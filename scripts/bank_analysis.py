@@ -310,6 +310,9 @@ def parse_financial_row(r):
         "cet1": rd_(r.get("HXYJBCZL")),
         "profit_yoy": rd_(r.get("PARENTNETPROFITTZ")),
         "revenue_yoy": rd_(r.get("TOTALOPERATEREVETZ")),
+        # 年化归母净利(元): 供计算动态市盈率(总市值/年化净利), 展示参考用
+        "_np_annualized": _num(r.get("PARENTNETPROFIT")) * fac
+        if _num(r.get("PARENTNETPROFIT")) is not None else None,
     }
 
 
@@ -332,7 +335,7 @@ def fetch_financial(code, retries=2):
 
 def fetch_valuation_history(code):
     """东财个股估值史(约2018起, 按日期升序整理):
-    返回 ({date:pb}, {date,close,pb,pe}) 或 (None,None)"""
+    返回 ({date:pb}, {date,close,pb,pe,chg_pct,total_mv}) 或 (None,None)"""
     try:
         import akshare as ak
         import pandas as pd
@@ -342,12 +345,16 @@ def fetch_valuation_history(code):
         df["市净率"] = pd.to_numeric(df["市净率"], errors="coerce")
         df["PE(TTM)"] = pd.to_numeric(df["PE(TTM)"], errors="coerce")
         df["当日收盘价"] = pd.to_numeric(df["当日收盘价"], errors="coerce")
+        df["当日涨跌幅"] = pd.to_numeric(df["当日涨跌幅"], errors="coerce")
+        df["总市值"] = pd.to_numeric(df["总市值"], errors="coerce")
         df = df.sort_values("数据日期")
         ser = dict(zip(df["数据日期"].astype(str), df["市净率"]))
         last = df.dropna(subset=["市净率"]).iloc[-1]
         cur = {"date": str(last["数据日期"]), "close": float(last["当日收盘价"]),
                "pb": float(last["市净率"]),
-               "pe": None if pd.isna(last["PE(TTM)"]) else float(last["PE(TTM)"])}
+               "pe": None if pd.isna(last["PE(TTM)"]) else float(last["PE(TTM)"]),
+               "chg_pct": None if pd.isna(last["当日涨跌幅"]) else float(last["当日涨跌幅"]),
+               "total_mv": None if pd.isna(last["总市值"]) else float(last["总市值"])}
         return ser, cur
     except Exception:
         return None, None
@@ -500,10 +507,16 @@ def run(detail_code=None, make_html=True):
 
     for r in raw_rows:
         ser, cur = r.pop("_val_hist"), r.pop("_val_cur")
+        np_ann = r.pop("_np_annualized", None)
         if cur:
             r["close"] = round(cur["close"], 2)
             r["pb"] = round(cur["pb"], 3)
             r["pe_ttm"] = round(cur["pe"], 2) if cur.get("pe") is not None else None
+            r["chg_pct"] = round(cur["chg_pct"], 2) if cur.get("chg_pct") is not None else None
+            r["total_mv_yi"] = round(cur["total_mv"] / 1e8, 1) if cur.get("total_mv") else None
+            # 动态市盈率(参考列): 总市值 ÷ 年化归母净利
+            if np_ann and np_ann > 0 and cur.get("total_mv"):
+                r["pe_dyn"] = round(cur["total_mv"] / np_ann, 2)
         if ser and cur and cur.get("pb"):
             pb_list = [v for v in ser.values() if v is not None and not math.isnan(v) and v > 0]
             need = min(750, len(pb_list))          # 近3年窗口
@@ -612,13 +625,14 @@ def _pad(s, width):
     return out + " " * max(0, width - disp)
 
 
-COLW = [4, 9, 7, 7, 6, 4, 6, 6, 6, 6, 6, 6, 6, 7, 12]
+COLW = [4, 9, 7, 7, 6, 4, 6, 6, 6, 6, 6, 6, 15, 7, 7, 6, 7, 11]
 
 
 def print_table(ranked):
-    print("\n===== 个股五维评分(截面分位打分, 0-100) =====")
+    print("\n===== 个股五维评分(截面分位打分, 0-100) | 现价/PE为行情参考列 =====")
     hdr = ["排名", "名称", "代码", "类别", "总分", "档位",
-           "盈利", "质量", "成长", "资本", "估值", "PB", "不良%", "覆盖%", "报告期"]
+           "盈利", "质量", "成长", "资本", "估值", "PB",
+           "现价(涨跌%)", "PETTM", "PE动", "不良%", "覆盖%", "报告期"]
     print(" ".join(_pad(h, w) for h, w in zip(hdr, COLW)))
     for i, r in enumerate(ranked, 1):
         dm = r["维度分"]
@@ -627,8 +641,12 @@ def print_table(ranked):
         for dim in ["盈利能力", "资产质量", "成长性", "资本充足", "估值吸引力"]:
             v = dm.get(dim)
             cells.append(f"{v:g}" if isinstance(v, (int, float)) else "—")
-        cells += [_fmt(r.get("pb"), "pb"), _fmt(r.get("npl_ratio")),
-                  _fmt(r.get("provision_cov")), r.get("报告期") or "—"]
+        px = (_fmt(r.get("close")) +
+              (f"({_fmt(r.get('chg_pct'), '%')})" if r.get("chg_pct") is not None else ""))
+        cells += [_fmt(r.get("pb"), "pb"), px,
+                  _fmt(r.get("pe_ttm")), _fmt(r.get("pe_dyn")),
+                  _fmt(r.get("npl_ratio")), _fmt(r.get("provision_cov")),
+                  r.get("报告期") or "—"]
         mark = " ⚠️" if r.get("告警") else ""
         print(" ".join(_pad(c, w) for c, w in zip(cells, COLW)) + mark)
 
@@ -684,10 +702,15 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <div class="card">
 <h2>📊 L2 个股五维评分（⚠️底色行为触发资产质量降档）</h2>
 <table><tr><th>#</th><th>银行</th><th>类别</th><th>总分</th><th>档位</th>
-<th>维度分</th><th>PB</th><th>不良率</th><th>拨备覆盖率</th><th>相对板块PB</th>
+<th>维度分</th><th>现价(涨跌%)</th><th>PE-TTM</th><th>PE动态</th><th>PB</th>
+<th>不良率</th><th>拨备覆盖率</th><th>相对板块PB</th>
 <th>PB自身分位</th><th>告警 / 报告期</th></tr>
 @BANKROWS@
-</table></div>
+</table>
+<p style="color:#98a2b3;font-size:11px;margin:8px 0 0">
+现价、涨跌幅、PE-TTM、PE动态为行情参考信息，<b>不参与五维评分</b>——
+银行股估值锚定 PB 与 PB÷ROE，PE 受拨备计提与减值扰动较大，仅作交叉观察。
+PE动态 = 总市值 ÷ 最新报告期年化归母净利。</p></div>
 
 <div class="card">
 <h2>💰 银行ETF池（名称含“银行”按规模Top8动态发现）</h2>
@@ -714,11 +737,17 @@ def gen_html(rep):
         warn = "<br>".join(f"<span class='warn'>⚠ {esc(w)}</span>" for w in r.get("告警") or []) or "—"
         cell = lambda k, fmt="{:.0f}": (
             fmt.format(dm[k]) if isinstance(dm.get(k), (int, float)) else "—")
-        pb = lambda v, fmt="{:.2f}": fmt.format(v) if isinstance(v, (int, float)) else "—"
+        num = lambda v, fmt="{:.2f}": fmt.format(v) if isinstance(v, (int, float)) else "—"
+        px = num(r.get("close"))
+        chg = r.get("chg_pct")
+        if isinstance(chg, (int, float)):
+            cls = "#c2410c" if chg > 0 else ("#1d4ed8" if chg < 0 else "#98a2b3")
+            px += f" (<span style='color:{cls}'>{chg:+.2f}%</span>)"
         bank_rows.append(
             "<tr%s><td>%d</td><td><b>%s</b><br><span class='mono'>%s</span></td>"
             "<td>%s</td><td class='score'>%.1f</td><td><b>%s</b></td>"
             "<td style='white-space:nowrap'>盈%s 质%s 成%s 资%s 估%s</td>"
+            "<td class='mono' style='white-space:nowrap'>%s</td><td>%s</td><td>%s</td>"
             "<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
             "<td>%s<br><span class='period'>%s</span></td></tr>" % (
                 " class='gate'" if r.get("告警") else "",
@@ -726,10 +755,13 @@ def gen_html(rep):
                 r["基础分"], esc(r["档位"]),
                 cell("盈利能力"), cell("资产质量"), cell("成长性"),
                 cell("资本充足"), cell("估值吸引力"),
-                pb(r.get("pb")), pb(r.get("npl_ratio"), "{:.2f}%"),
-                pb(r.get("provision_cov"), "{:.0f}%"),
-                pb(r.get("pb_vs_sector"), "{:+.1f}%"),
-                pb(r.get("pb_self_pctile"), "{:.0f}"),
+                px,
+                num(r.get("pe_ttm")), num(r.get("pe_dyn")),
+                num(r.get("pb")),
+                num(r.get("npl_ratio"), "{:.2f}%"),
+                num(r.get("provision_cov"), "{:.0f}%"),
+                num(r.get("pb_vs_sector"), "{:+.1f}%"),
+                num(r.get("pb_self_pctile"), "{:.0f}"),
                 warn, esc(r.get("报告期") or "—")))
 
     etf_rows = []
