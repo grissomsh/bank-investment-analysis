@@ -814,7 +814,8 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
        padding:1px 8px;font-size:12px;color:#42536b;font-family:ui-monospace,Menlo,monospace}
 </style></head><body>
 <h1>🏦 A股银行投资分析 <span class="pill">@ICON@ @TEMP@ 分 · @LEVEL@</span></h1>
-<div class="sub">生成时间 @TS@｜基准指数 @IDXNAME@ 收盘 @IDXCLOSE@｜五维权重：盈利30 质量25 成长15 资本10 估值20</div>
+<div class="sub">@TS@｜基准指数 @IDXNAME@ 收盘 @IDXCLOSE@｜五维权重：盈利30 质量25 成长15 资本10 估值20<br>
+温度档位：≥75 积极配置 · 55–75 正常定投 · 40–55 持有不加仓 · &lt;40 减持/止盈观察&nbsp;&nbsp;｜&nbsp;&nbsp;个股档位：A+ ≥80 · A ≥70 · B ≥60 · C ≥50 · D &lt;50</div>
 
 <div class="card">
 <h2>🌡️ L1 行业温度（ETF配置节奏）</h2>
@@ -831,9 +832,6 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 </div>
 @CHARTBLOCK@
 <div style="color:#98a2b3;font-size:11px;margin-top:4px">近120个交易日收盘走势（悬停查看数值）｜ 官方PE-TTM @PETTM_IDX@（中证官网口径，本地累积 @ARCHIVE@ 行）</div>
-</div>
-<p style="color:#7a869a;font-size:12px;margin:8px 0 0">
-温度≥75 积极配置 ｜ 55–75 正常定投 ｜ 40–55 持有不加仓 ｜ &lt;40 减持/止盈观察。</p>
 </div>
 
 <div class="card">
