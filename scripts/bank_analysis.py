@@ -271,26 +271,41 @@ def index_changes(closes, dates, today=None):
     return out
 
 
-def sparkline_svg(values, width=560, height=56, pad=2):
-    """纯计算: 收盘序列 → 内联SVG迷你走势图(面积+折线), 红涨蓝跌"""
-    if not values or len(values) < 2:
-        return ""
-    lo, hi = min(values), max(values)
-    rng = (hi - lo) or 1.0
-    n = len(values)
-    pts = []
-    for i, v in enumerate(values):
-        x = pad + i * (width - 2 * pad) / (n - 1)
-        y = height - pad - (v - lo) / rng * (height - 2 * pad)
-        pts.append(f"{x:.1f},{y:.1f}")
-    color = "#c2410c" if values[-1] >= values[0] else "#1d4ed8"
-    poly = " ".join(pts)
-    return (f"<svg width='{width}' height='{height}' viewBox='0 0 {width} {height}' "
-            f"style='display:block'>"
-            f"<polygon points='{pad},{height-pad} {poly} {width-pad},{height-pad}' "
-            f"fill='{color}' opacity='0.08'/>"
-            f"<polyline points='{poly}' fill='none' stroke='{color}' stroke-width='1.6'/>"
-            f"</svg>")
+ECHART_CDN = [
+    "https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js",
+    "https://cdn.staticfile.net/echarts/5.4.3/echarts.min.js",
+    "https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js",
+]
+
+
+def chart_block(dates, closes):
+    """ECharts 交互走势图(与卡片同宽): 多CDN回退, 离线时显示占位提示"""
+    import json as _json
+    return (
+        "<div id='idxchart' style='width:100%;height:230px'></div>"
+        "<script>(function(){var urls=" + _json.dumps(ECHART_CDN) + ";var i=0;"
+        "function next(){if(i>=urls.length){document.getElementById('idxchart').innerHTML="
+        "'<div style=\"color:#98a2b3;font-size:12px;padding:40px;text-align:center\">"
+        "图表库CDN加载失败(离线?), 完整数据仍在同名JSON文件中</div>';return;}"
+        "var s=document.createElement('script');s.src=urls[i++];"
+        "s.onload=function(){if(typeof echarts==='undefined'){next();return;}init();};"
+        "s.onerror=next;document.head.appendChild(s);}"
+        "function init(){var c=echarts.init(document.getElementById('idxchart'));"
+        "var dates=" + _json.dumps(dates) + ";var closes=" + _json.dumps(closes) + ";"
+        "c.setOption({grid:{left:10,right:14,top:14,bottom:6,containLabel:true},"
+        "tooltip:{trigger:'axis'},"
+        "xAxis:{type:'category',data:dates,boundaryGap:false,"
+        "axisLabel:{interval:Math.max(1,Math.floor(dates.length/8)),color:'#98a2b3',fontSize:11},"
+        "axisLine:{lineStyle:{color:'#dde4ec'}},axisTick:{show:false}},"
+        "yAxis:{type:'value',scale:true,splitLine:{lineStyle:{color:'#eef1f5'}},"
+        "axisLabel:{color:'#98a2b3',fontSize:11}},"
+        "series:[{type:'line',data:closes,symbol:'none',"
+        "lineStyle:{color:'#c2410c',width:1.6},"
+        "areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,"
+        "colorStops:[{offset:0,color:'rgba(194,65,12,0.16)'},{offset:1,color:'rgba(194,65,12,0)'}]}}}]});"
+        "window.addEventListener('resize',function(){c.resize()});}"
+        "next();})();</script>"
+    )
 
 
 # ============================================================
@@ -648,6 +663,7 @@ def run(detail_code=None, make_html=True):
         "index_close": idx_close, "index_ma250_dev_pct": idx_dev250,
         "index_changes": idx_chg,
         "index_closes120": [round(k["c"], 2) for k in idx_kline[-120:]],
+        "index_dates120": [k["date"][5:] for k in idx_kline[-120:]],
         "index_pe_ttm": (cs_rows[-1]["pe_ttm"] if cs_rows else None),
         "sector": {"temp": temp, "level": lvl, "icon": icon,
                    "median_pb": round(sector_pb_now, 4) if sector_pb_now else None,
@@ -813,8 +829,8 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <b style="color:#42536b;font-size:12px">@IDXNAME@ 近端变化</b>
 <span class='chip'>日 @CHG_D1@</span><span class='chip'>5日 @CHG_W1@</span><span class='chip'>20日 @CHG_M1@</span><span class='chip'>60日 @CHG_Q1@</span><span class='chip'>YTD @CHG_YTD@</span><span class='chip'>1年 @CHG_Y1@</span>
 </div>
-@SPARK@
-<div style="color:#98a2b3;font-size:11px;margin-top:4px">近120个交易日收盘（红涨蓝跌）｜ 官方PE-TTM @PETTM_IDX@（中证官网口径，本地累积 @ARCHIVE@ 行）</div>
+@CHARTBLOCK@
+<div style="color:#98a2b3;font-size:11px;margin-top:4px">近120个交易日收盘走势（悬停查看数值）｜ 官方PE-TTM @PETTM_IDX@（中证官网口径，本地累积 @ARCHIVE@ 行）</div>
 </div>
 <p style="color:#7a869a;font-size:12px;margin:8px 0 0">
 温度≥75 积极配置 ｜ 55–75 正常定投 ｜ 40–55 持有不加仓 ｜ &lt;40 减持/止盈观察。</p>
@@ -931,7 +947,8 @@ def gen_html(rep):
     chg_chip = lambda k: (_fmt(ic.get(k), "%").replace("+", "<span style='color:#c2410c'>+</span>"
                           ).replace("-", "<span style='color:#1d4ed8'>-</span>", 1)
                           if ic.get(k) is not None else "—")
-    spark = sparkline_svg(rep.get("index_closes120") or [])
+    chart = chart_block(rep.get("index_dates120") or [],
+                        rep.get("index_closes120") or [])
 
     html = (_HTML_TEMPLATE
             .replace("@TABLEW@", "100%")
@@ -956,7 +973,7 @@ def gen_html(rep):
             .replace("@CHG_Q1@", chg_chip("q1"))
             .replace("@CHG_YTD@", chg_chip("ytd"))
             .replace("@CHG_Y1@", chg_chip("y1"))
-            .replace("@SPARK@", spark)
+            .replace("@CHARTBLOCK@", chart)
             .replace("@PETTM_IDX@", _fmt(rep.get("index_pe_ttm")))
             .replace("@TYPEMIX@", esc(mix or "—"))
             .replace("@ARCHIVE@", str(sec["csindex_archive_rows"]))
