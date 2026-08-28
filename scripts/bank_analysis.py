@@ -616,7 +616,8 @@ def run(detail_code=None, make_html=True):
     report["etfs"] = []
     for e in etf_pool:
         st = share_change_stats(shares_map.get(e["code"], {}))
-        e.update(ma250_dev_pct=ma_dev_pct(fetch_kline(tcode(e["code"]), 320), 250), **st)
+        e.update(ma250_dev_pct=ma_dev_pct(fetch_kline(tcode(e["code"]), 320), 250),
+                 track=fetch_track_index(e["code"], e.get("name", "")), **st)
         report["etfs"].append(e)
 
     os.makedirs(WORKSPACE, exist_ok=True)
@@ -628,7 +629,8 @@ def run(detail_code=None, make_html=True):
     if report["etfs"]:
         print("\n===== ETF份额追踪(一级市场申赎, 交易所口径) =====")
         for e in report["etfs"][:3]:
-            print(f"  {e['code']} {e['name']}: 份额 {e.get('shares_yi') or '—'}亿份 | "
+            print(f"  {e['code']} {e['name']}[{e.get('track') or '指数未知'}]: "
+                  f"份额 {e.get('shares_yi') or '—'}亿份 | "
                   f"日Δ {_fmt(e.get('day_chg_pct'), '%')} | 5日Δ {_fmt(e.get('d5_chg_pct'), '%')}"
                   f" (样本{e.get('n')}日, 最新{e.get('date') or '—'})")
     if make_html:
@@ -778,12 +780,13 @@ PE动态 = 总市值 ÷ 最新报告期年化归母净利。
 
 <div class="card">
 <h2>💰 银行ETF池（名称含“银行”按规模Top8动态发现）</h2>
-<table><tr><th>代码</th><th>名称</th><th>现价</th><th>IOPV溢价</th><th>MA250偏离</th>
+<table><tr><th>代码</th><th>名称</th><th>追踪指数</th><th>现价</th><th>IOPV溢价</th><th>MA250偏离</th>
 <th>份额(亿份)</th><th>份额日Δ</th><th>份额5日Δ</th>
 <th>市值(亿)</th><th>今日成交(亿)</th></tr>
 @ETFROWS@
 </table>
 <p style="color:#98a2b3;font-size:11px;margin:8px 0 0">
+追踪指数来自基金业绩比较基准；仅“中证银行指数”受本报告 L1 温度分直接约束，跟踪其他指数（如 AH 优选类）的 ETF 需另行对照其自身基准。
 份额=一级市场申赎余额(交易所官方口径, 交易日盘后约19:00发布), 净申购代表配置资金流入、
 净赎回代表浮盈兑现; 与二级市场量价相互独立。份额列自本地落库起累积, 冷启动期累计变化为空属正常。</p></div>
 
@@ -847,11 +850,15 @@ def gen_html(rep):
             cc = "#c2410c" if chg > 0 else ("#1d4ed8" if chg < 0 else "#98a2b3")
             chg_txt = f"<span style='color:{cc}'>{chg:+.2f}%</span>"
         d5 = e.get("d5_chg_pct")
+        trk = e.get("track")
+        trk_txt = esc(trk) if trk else "—"
+        if trk and "中证银行指数" in trk:
+            trk_txt = f"<span style='color:#1d4ed8;font-weight:600'>{trk_txt}</span>"
         etf_rows.append(
-            "<tr><td class='mono'>%s</td><td>%s</td><td>%s</td><td>%s</td>"
+            "<tr><td class='mono'>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
             "<td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
             "<td>%s</td><td>%s</td></tr>" % (
-                esc(e["code"]), esc(e["name"]),
+                esc(e["code"]), esc(e["name"]), trk_txt,
                 _fmt(e.get("price")), _fmt(e.get("premium_pct"), "%"),
                 _fmt(e.get("ma250_dev_pct"), "%"),
                 _fmt(e.get("shares_yi")), chg_txt, _fmt(d5, "%"),
@@ -969,6 +976,38 @@ def share_change_stats(series):
     rd = lambda x: round(x, 2) if x is not None else None
     return {"date": dates[-1], "shares_yi": round(latest / 1e8, 2),
             "day_chg_pct": rd(day_pct), "d5_chg_pct": rd(d5_pct), "n": n}
+
+
+def parse_track_index(benchmark):
+    """纯计算: 从业绩比较基准文本提取跟踪指数名, 如
+    '中证银行指数收益率×95%+...' → '中证银行指数'。"""
+    if not benchmark:
+        return None
+    m = re.search(r"[一-龥A-Za-z0-9]+指数", benchmark)
+    return m.group(0) if m else None
+
+
+def fetch_track_index(code, name=""):
+    """ETF跟踪指数: 天天基金F10基金概况页 → 业绩比较基准 → 解析指数名。
+    结果落库 etf_meta 缓存(静态信息只查一次)。"""
+    cached = bank_data_store.load_etf_meta(code)
+    if cached and cached[2]:
+        return cached[2]
+    try:
+        url = f"https://fundf10.eastmoney.com/jbgk_{code}.html"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=20, context=SSL_CTX) as resp:
+            html = resp.read().decode("utf8", "ignore")
+        bm = None
+        m = re.search(r"业绩比较基准[^<]*(?:<[^>]+>){1,4}\s*([^<]{4,120})", html)
+        if m:
+            bm = m.group(1).strip()
+        idx = parse_track_index(bm)
+        if idx or bm:
+            bank_data_store.upsert_etf_meta(code, name, idx, bm)
+        return idx
+    except Exception:
+        return None
 
 
 # ============================================================

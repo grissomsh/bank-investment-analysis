@@ -233,5 +233,12 @@ check("空序列安全", share_change_stats({})["n"] == 0 and share_change_stats
 s2 = {"2026-08-26": 5e8}
 check("单点无变化率", share_change_stats(s2)["day_chg_pct"] is None and share_change_stats(s2)["n"] == 1)
 
+print("\n[13] parse_track_index 跟踪指数解析")
+from bank_analysis import parse_track_index  # noqa: E402
+check("普通银行指数基准", parse_track_index("中证银行指数收益率×95%+银行间活期存款利率(税后)×5%") == "中证银行指数")
+check("AH优选基准", parse_track_index("中证银行AH价格优选指数收益率×95%+活期存款利率×5%") == "中证银行AH价格优选指数")
+check("空文本→None", parse_track_index("") is None and parse_track_index(None) is None)
+check("无指数名→None", parse_track_index("同期活期存款利率") is None)
+
 print(f"\n===== 结果: {PASS} PASS / {FAIL} FAIL =====")
 sys.exit(1 if FAIL else 0)

@@ -27,6 +27,8 @@ def _connect():
     conn.execute("""CREATE TABLE IF NOT EXISTS etf_shares (
         date TEXT, code TEXT, shares REAL,
         PRIMARY KEY (date, code))""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS etf_meta (
+        code TEXT PRIMARY KEY, name TEXT, track_index TEXT, benchmark TEXT)""")
     return conn
 
 
@@ -75,6 +77,24 @@ def etf_share_dates():
         "SELECT DISTINCT date FROM etf_shares").fetchall()]
     conn.close()
     return set(rows)
+
+
+def upsert_etf_meta(code, name, track_index, benchmark):
+    conn = _connect()
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO etf_meta VALUES (?,?,?,?)",
+            (code, name, track_index, benchmark))
+    conn.close()
+
+
+def load_etf_meta(code):
+    conn = _connect()
+    row = conn.execute(
+        "SELECT code, name, track_index, benchmark FROM etf_meta WHERE code=?",
+        (code,)).fetchone()
+    conn.close()
+    return row
 
 
 def stats():
