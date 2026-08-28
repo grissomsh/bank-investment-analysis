@@ -812,6 +812,15 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
  .foot{color:#98a2b3;font-size:11px;text-align:center;margin-top:22px}
  .chip{display:inline-block;background:#f2f5f9;border:1px solid #e6eaef;border-radius:6px;
        padding:1px 8px;font-size:12px;color:#42536b;font-family:ui-monospace,Menlo,monospace}
+ .kv{position:relative;cursor:help;outline:none}
+ .kv:focus{border-color:#9db4d8}
+ .kv:hover::after,.kv:focus::after{content:attr(data-tip);
+       position:absolute;left:0;bottom:calc(100% + 8px);z-index:60;width:min(360px,72vw);
+       background:#1f2937;color:#eef2f8;padding:10px 12px;border-radius:8px;
+       font-size:11px;line-height:1.7;font-weight:400;white-space:normal;text-align:left;
+       box-shadow:0 8px 24px rgba(16,24,40,.18)}
+ .kv:hover::before,.kv:focus::before{content:"";position:absolute;left:22px;bottom:100%;
+       border:6px solid transparent;border-top-color:#1f2937}
 </style></head><body>
 <h1>🏦 A股银行投资分析 <span class="pill">@ICON@ @TEMP@ 分 · @LEVEL@</span></h1>
 <div class="sub">@TS@｜基准指数 @IDXNAME@ 收盘 @IDXCLOSE@｜五维权重：盈利30 质量25 成长15 资本10 估值20<br>
@@ -820,10 +829,14 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <div class="card">
 <h2>🌡️ L1 行业温度（ETF配置节奏）</h2>
 <div class="grid">
-<div class="kv"><span>PB温度 · 板块中位数PB历史分位</span><b>@SPB@ <small style="font-size:11px">@MEDPB@ → @PBPCT@</small></b></div>
-<div class="kv"><span>股债性价比 · 股息率−10Y国债</span><b>@SSPREAD@ <small style="font-size:11px">@DIVY@ − @TY10@ = @SPREADPP@</small></b></div>
-<div class="kv"><span>动量确认 · 相对MA250偏离</span><b>@SMOM@ <small style="font-size:11px">@IDXDEV@</small></b></div>
-<div class="kv"><span>Top10 类别分布</span><b style="font-size:14px">@TYPEMIX@</b></div>
+<div class="kv" tabindex="0" data-tip='42家成分股"等权中位数PB"在其自身2018年以来分布中的百分位：分位越低 = 相对自身历史越便宜。用中位数避免大行绑架读数，用自身历史分位避免利率中枢下移造成的绝对值失真。分段线性映射为0-100分（≤10%分位≈95分，≥90%分位≈20分）。因子权重50%。'>
+<span>PB温度 · 板块中位数PB历史分位</span><b>@SPB@ <small style="font-size:11px">@MEDPB@ → @PBPCT@</small></b></div>
+<div class="kv" tabindex="0" data-tip='中证银行指数股息率（近12个月，中证官网口径）减 10年期国债收益率。银行股具有类固收属性：利差越宽，"拿股息替代利息"资金的吸引力越强。≤0pp≈0分，≥2.5pp≈95分。因子权重35%。'>
+<span>股债性价比 · 股息率−10Y国债</span><b>@SSPREAD@ <small style="font-size:11px">@DIVY@ − @TY10@ = @SPREADPP@</small></b></div>
+<div class="kv" tabindex="0" data-tip='指数收盘价相对250日均线的偏离，用于缓解纯左侧"越跌越买"的陷阱：趋势确认时略加码，深跌不额外惩罚。偏离百分点×1.25加到中性50上，钳制在5-95。因子权重15%，全场唯一技术分析成分，刻意压低。'>
+<span>动量确认 · 相对MA250偏离</span><b>@SMOM@ <small style="font-size:11px">@IDXDEV@</small></b></div>
+<div class="kv" tabindex="0" data-tip='总分前10名中，国有大行/股份行/城商行/农商行的家数分布。用于检查高分池是否过度集中于某一类银行——同类集中意味着共同的区域或模式风险。'>
+<span>Top10 类别分布</span><b style="font-size:14px">@TYPEMIX@</b></div>
 </div>
 <div style="margin-top:12px">
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
@@ -836,10 +849,19 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 
 <div class="card">
 <h2>📊 L2 个股五维评分（⚠️底色行为触发资产质量降档）</h2>
-<table><tr><th>#</th><th>银行</th><th>类别</th><th>总分</th><th>档位</th>
-<th>维度分</th><th>现价(涨跌%)</th><th>PE-TTM</th><th>PE动态</th><th>PB</th>
-<th>不良率</th><th>拨备覆盖率</th><th>拨备Δ同比</th><th>相对板块PB</th>
-<th>PB自身分位</th><th>分红率</th><th>告警 / 报告期</th></tr>
+<table><tr><th>#</th><th>银行</th><th>类别</th><th title="Σ维度分×维度权重, 缺失维度自动重归一">总分</th><th title="A+ ≥80 / A ≥70 / B ≥60 / C ≥50 / D <50">档位</th>
+<th title="盈利/质量/成长/资本/估值五个维度的截面百分位分">维度分</th>
+<th title="行情参考列, 不参与评分">现价(涨跌%)</th>
+<th title="滚动市盈率, 行情参考列不参与评分——银行PE受拨备计提扰动大">PE-TTM</th>
+<th title="总市值÷最新报告期年化归母净利, 行情参考列不参与评分">PE动态</th>
+<th title="市净率 = 股价÷每股净资产, 银行股估值的锚">PB</th>
+<th title="低优指标, >2.0% 触发一票否决强制降档">不良率</th>
+<th title="拨备÷不良贷款, 高优; <130% 触发一票否决强制降档">拨备覆盖率</th>
+<th title="拨备覆盖率−上年同期(百分点), 负值=消耗蓄水池反哺利润; 资产质量维度权重20%">拨备Δ同比</th>
+<th title="个股PB÷板块中位数PB−1, 回答和同行比贵不贵; 低优">相对板块PB</th>
+<th title="当前PB在该股自身近3年分布中的百分位, 回答和自己比贵不贵; 低优">PB自身分位</th>
+<th title="近12个月实施现金分红÷年化归母净利, 含中期分红; 估值维度权重20%">分红率</th>
+<th title="一票否决/降档原因与该行最新财报期">告警 / 报告期</th></tr>
 @BANKROWS@
 </table>
 <p style="color:#98a2b3;font-size:11px;margin:8px 0 0">
