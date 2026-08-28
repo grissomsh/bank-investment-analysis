@@ -35,8 +35,11 @@ python3 bank_analysis.py                 # 注意: PEP668环境请用 venv 内�
 | 环境自检（跑任何分析前建议先执行） | `python3 bank_analysis.py --healthcheck` |
 | 附带单只个股详析 | `python3 bank_analysis.py --detail 600036` |
 | 不生成 HTML（只要表格+JSON） | `python3 bank_analysis.py --no-html` |
+| 下载定期报告PDF（年报/中报, 按年归档） | `python3 bank_analysis.py --report 601128 [--limit 4]` |
 | 查看本地数据库状态 | `python3 bank_analysis.py --stats` |
 | 打分模型离线回归 | `python3 tests/test_scoring.py` |
+
+定期报告存放于 `reports/<报告年度>/<代码_简称_年报|中报>.pdf`（巨潮资讯官方PDF，已含去重），是接口层缺失的前瞻资产质量指标（逾期结构/迁徙率/ECL三阶段/分红方案）的唯一来源。
 
 ---
 
@@ -79,8 +82,9 @@ L3 组合: ETF底仓看温度档位 · 个股卫星取高分池 · 控制大行/
 
 | 数据 | API | 说明 |
 | --- | --- | --- |
-| 银行专项财务 | akshare `stock_financial_analysis_indicator_em` | 东财F10, 含NIM/不良/拨备/资本充足率 |
+| 银行专项财务 | akshare `stock_financial_analysis_indicator_em` | 东财F10, 含NIM/不良/拨备/资本充足率; 全量报告期算拨备同比 |
 | 个股PB/PE史 | akshare `stock_value_em` | 2018起, 合成板块中位数PB序列 |
+| 分红送配明细 | akshare `stock_fhps_detail_em` | 滚动12个月实施分红 → 分红率因子 |
 | 指数官方估值 | akshare `stock_zh_index_value_csindex` | 仅近20日, 依赖SQLite逐日累积 |
 | 日K线 | 腾讯 `web.ifzq.gtimg.cn` | 股票/指数/ETF 通吃 |
 | 国债收益率 | akshare `bond_zh_us_rate` | 10Y 用于利差因子 |

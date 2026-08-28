@@ -14,10 +14,11 @@ Pure Python stdlib + akshare (the single external dependency). Run directly:
 python3 scripts/bank_analysis.py                    # full pipeline: fetch → temperature → score → console+JSON+HTML
 python3 scripts/bank_analysis.py --detail 600036    # additionally print one bank's metric detail block
 python3 scripts/bank_analysis.py --no-html          # skip HTML report
+python3 scripts/bank_analysis.py --report 601128    # download annual/interim report PDFs (cninfo) into reports/<fiscal-year>/
 python3 scripts/bank_analysis.py --healthcheck      # probe all six data sources + SQLite, exit 1 on failure
 python3 scripts/bank_analysis.py --stats            # local csindex archive status
 bash setup.sh                                       # deploy to ~/.bank-skill (reuses ~/.etf-skill/venv when present)
-python3 tests/test_scoring.py                       # offline scoring regression (46 checks, no network)
+python3 tests/test_scoring.py                       # offline scoring regression (62 checks, no network)
 ```
 
 **On this machine**: Homebrew Python is PEP 668-externally-managed. Use an existing venv with akshare — `~/.etf-skill/venv/bin/python` (from the etf-three-factor skill) or `~/.bank-skill/venv` created by setup.sh.
