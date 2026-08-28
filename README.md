@@ -1,11 +1,11 @@
-# bank-investment-analysis
+# 银行投资分析 Skill（bank-investment-analysis）
 
-A股银行股 / 银行 ETF 定量投资分析系统。回答两个问题：
+A 股银行股 / 银行 ETF 定量投资分析 Skill。回答两个问题：
 
 1. **现在该不该加银行敞口？** → L1 行业温度分（板块 PB 历史分位 + 股息率−10Y 国债利差 + 动量确认）
 2. **如果要选个股，选谁？** → L2 对 42 家上市银行做同业截面五维评分 + 资产质量一票否决
 
-数据全自动拉取：东财 F10 银行专项财务指标（净息差/不良率/拨备覆盖率/三级资本充足率等，非通用字段）、个股估值史（2018 起）、中证官网指数估值、腾讯 K 线、10Y 国债收益率、ETF 实时清单。
+数据全自动拉取：东财 F10 银行专项财务指标（净息差/不良率/拨备覆盖率/三级资本充足率等，非通用字段）、个股估值史（2018 起）、中证官网指数估值、腾讯 K 线、10Y 国债收益率、ETF 实时清单与份额（沪深两所逐日累积）、巨潮资讯定期报告 PDF（按年归档）。
 
 ## Skill 描述
 
@@ -27,28 +27,47 @@ A股银行股 / 银行 ETF 定量投资分析系统。回答两个问题：
 - `scripts/bank_universe.py`：监控池与模型常量（单点定义）
 - `scripts/bank_data_store.py`：SQLite 存档模块
 - `references/bank_framework.md`：框架方法论详解（DDM 推导 / 权重依据 / 字段口径坑）
+- `references/research_changshu_2026.md`：常熟银行研究归档（模型盲区实证案例）
 - `tests/test_scoring.py`：打分模型离线回归测试
 
-## 快速开始
+## 使用方式
+
+两种用法任选：当作 Claude Code Skill 用自然语言驱动，或当作普通命令行工具。
+
+### 用法一：作为 Claude Code Skill（推荐）
+
+把本仓库放进 Claude Code 的 skills 目录（如 `~/.claude/skills/bank-investment-analysis`），之后直接用自然语言驱动，Claude 会按 `SKILL.md` 的指引执行脚本并解读结果：
+
+- "跑一下今天的银行分析"
+- "给招商银行做个体检"
+- "下载常熟银行的年报和中报"
+
+### 用法二：作为命令行工具
 
 ```bash
-# 1. 一键部署
+# 1. 一键部署：装脚本到 ~/.bank-skill，自动准备 akshare 环境（优先复用已有 venv）
 bash setup.sh
 
-# 2. 环境/数据源自检
-~/.bank-skill/venv/bin/python ~/.bank-skill/scripts/bank_analysis.py --healthcheck
+# 2. 环境自检 —— setup.sh 结尾会打印实际使用的 python 路径，下同
+<python> ~/.bank-skill/scripts/bank_analysis.py --healthcheck
 
-# 3. 完整分析（1~3分钟）
-cd ~/.bank-skill/scripts && ./venv/bin/python bank_analysis.py   # 或复用 ~/.etf-skill/venv
+# 3. 完整分析（收盘后运行, 1~3分钟）
+<python> ~/.bank-skill/scripts/bank_analysis.py
 ```
 
-常用命令：
+输出：控制台评分表 + `~/.bank-skill/workspace/银行投资分析.html`（温度卡/评分表/ETF池/指数走势图）+ 同名 JSON。
 
-- `python3 bank_analysis.py --detail 600036`：附带招行详析
-- `python3 bank_analysis.py --no-html`：只要表格与 JSON
-- `python3 bank_analysis.py --report 601128`：下载该行年报/中报PDF，按报告年度归档到 `reports/<年份>/`（巨潮官方源，自动去重）
-- `python3 bank_analysis.py --stats`：本地数据库状态
-- `python3 tests/test_scoring.py`：离线回归（62 用例）
+常用命令（`<python>` 替换为部署时打印的解释器路径）：
+
+| 命令 | 作用 |
+| --- | --- |
+| `bank_analysis.py --healthcheck` | 六路数据源 + SQLite 自检，失败退出码 1 |
+| `bank_analysis.py --detail 600036` | 附带单只银行详析 |
+| `bank_analysis.py --report 601128` | 下载该行年报/中报 PDF，按报告年度归档到 `~/.bank-skill/workspace/reports/<年份>/`（巨潮官方源，自动去重） |
+| `bank_analysis.py --no-html` | 只要表格与 JSON |
+| `bank_analysis.py --stats` | 本地数据库状态 |
+
+开发相关：`python3 tests/test_scoring.py` 在源码仓库运行打分模型离线回归（76 用例，不触网）；改动 `scripts/bank_universe.py` 中的模型常量后必须重跑。
 
 ## 五维评分速览
 
@@ -101,5 +120,5 @@ cd ~/.bank-skill/scripts && ./venv/bin/python bank_analysis.py   # 或复用 ~/.
 
 ## 版权与声明
 
-- 本 skill 为个人量化研究工具，参考了公开的 PB-ROE 银行研究共识框架
+- 本 Skill 为个人量化研究工具，参考了公开的 PB-ROE 银行研究共识框架
 - 全部输出不构成投资建议，据此交易风险自负
