@@ -9,7 +9,7 @@ A 股银行股 / 银行 ETF 定量投资分析 Skill。回答两个问题：
 
 ## Skill 描述
 
-- 数据获取：六路免费数据源，单点失败自动降级
+- 数据获取：免费公开数据源，单点失败自动降级
 - 行业温度：`PB分位×50% + 股债利差×35% + 动量×15%`，四档配置动作
 - ETF份额追踪：一级市场申赎日变化(交易所官方口径)落库累积，作资金面参考列
 - 个股评分：盈利 30 / 资产质量 25 / 成长 15 / 资本充足 10 / 估值吸引力 20，截面百分位打分
@@ -22,7 +22,7 @@ A 股银行股 / 银行 ETF 定量投资分析 Skill。回答两个问题：
 
 - `articles/`：对外介绍文章与样例报告（`银行投资分析-样例报告.html` 为某交易日真实输出，供参考报告样式；浏览器打开查看，方法介绍见同目录文章，均非投资建议）
 - `SKILL.md`：skill 入口说明
-- `setup.sh`：一键部署脚本
+- `setup.sh`：安装脚本（把 Skill 装进 ~/.claude/skills/，就地建 venv 按需）
 - `scripts/bank_analysis.py`：主流水线
 - `scripts/bank_universe.py`：监控池与模型常量（单点定义）
 - `scripts/bank_data_store.py`：SQLite 存档模块
@@ -45,17 +45,17 @@ A 股银行股 / 银行 ETF 定量投资分析 Skill。回答两个问题：
 ### 用法二：作为命令行工具
 
 ```bash
-# 1. 一键部署：装脚本到 ~/.bank-skill，自动准备 akshare 环境（优先复用已有 venv）
+# 1. 安装：把 SKILL.md/scripts/references 装进 ~/.claude/skills/bank-investment-analysis
 bash setup.sh
 
 # 2. 环境自检 —— setup.sh 结尾会打印实际使用的 python 路径，下同
-<python> ~/.bank-skill/scripts/bank_analysis.py --healthcheck
+<python> ~/.claude/skills/bank-investment-analysis/scripts/bank_analysis.py --healthcheck
 
 # 3. 完整分析（收盘后运行, 1~3分钟）
-<python> ~/.bank-skill/scripts/bank_analysis.py
+<python> ~/.claude/skills/bank-investment-analysis/scripts/bank_analysis.py
 ```
 
-输出：控制台评分表 + `~/.bank-skill/workspace/银行投资分析.html`（温度卡/评分表/ETF池/指数走势图）+ 同名 JSON。
+输出：控制台评分表 + `~/.claude/skills/bank-investment-analysis/workspace/银行投资分析.html`（温度卡/评分表/ETF池/指数走势图）+ 同名 JSON。
 
 常用命令（`<python>` 替换为部署时打印的解释器路径）：
 
@@ -63,7 +63,7 @@ bash setup.sh
 | --- | --- |
 | `bank_analysis.py --healthcheck` | 全部数据源 + SQLite 自检，失败退出码 1 |
 | `bank_analysis.py --detail 600036` | 附带单只银行详析 |
-| `bank_analysis.py --report 601128` | 下载该行年报/中报 PDF，按报告年度归档到 `~/.bank-skill/workspace/reports/<年份>/`（巨潮官方源，自动去重） |
+| `bank_analysis.py --report 601128` | 下载该行年报/中报 PDF，按报告年度归档到安装目录 `workspace/reports/<年份>/`（巨潮官方源，自动去重） |
 | `bank_analysis.py --no-html` | 只要表格与 JSON |
 | `bank_analysis.py --stats` | 本地数据库状态 |
 

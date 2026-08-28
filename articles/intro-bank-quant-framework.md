@@ -66,24 +66,24 @@
 
 ## 想自己跑一套：装一次，两种用法
 
-这套东西做成了 Claude Code 的 Skill，本质是几个 Python 脚本加一份说明文件，只依赖免费的公开接口。安装只要两条命令，把仓库放进 skills 目录，再跑一次部署脚本：
+这套东西做成了 Claude Code 的 Skill，本质是几个 Python 脚本加一份说明文件，只依赖免费的公开接口。安装只要两条命令：克隆仓库到任意位置，跑一次安装脚本，Skill 会装进 Claude Code 的 skills 目录：
 
 ```bash
-git clone https://github.com/grissomsh/bank-investment-analysis.git ~/.claude/skills/bank-investment-analysis
-cd ~/.claude/skills/bank-investment-analysis && bash setup.sh
+git clone https://github.com/grissomsh/bank-investment-analysis.git
+cd bank-investment-analysis && bash setup.sh
 ```
 
-setup.sh 会把脚本装到家目录的 ~/.bank-skill，自动准备 akshare 环境（没有就就地建一个虚拟环境），结尾会打印本次可用的 python 路径，后面要用。
+setup.sh 会把 SKILL.md、脚本和文档装进 ~/.claude/skills/bank-investment-analysis，就地准备 akshare 环境（没有 venv 会就地建一个），结尾打印本次可用的 python 路径，后面要用。运行产物统一落在安装目录的 workspace/。
 
 用法一，对话式。装好后在 Claude Code 里直接说"跑一下今天的银行分析"，或者说"给招商银行做个体检""下载常熟银行的年报"，Claude 会按 SKILL.md 的指引替你执行脚本，再把结果讲成人话。
 
 用法二，命令行。收盘后跑一条（python 路径用 setup.sh 打印的那个）：
 
 ```bash
-<python> ~/.bank-skill/scripts/bank_analysis.py
+<python> ~/.claude/skills/bank-investment-analysis/scripts/bank_analysis.py
 ```
 
-一两分钟出结果：行业温度、42 家银行的评分表，以及 ~/.bank-skill/workspace/ 下的 HTML 报告，温度卡、五维评分、ETF 份额追踪、指数走势图都在里面。几个顺手的开关：--healthcheck 先查一遍数据源通不通；--detail 600036 输出某家银行的完整体检单；--report 601128 自动下载年报中报 PDF 并按年份归档，方便你对照前面说的"接口看不到的另一张脸"。
+一两分钟出结果：行业温度、42 家银行的评分表，以及 ~/.claude/skills/bank-investment-analysis/workspace/ 下的 HTML 报告，温度卡、五维评分、ETF 份额追踪、指数走势图都在里面。几个顺手的开关：--healthcheck 先查一遍数据源通不通；--detail 600036 输出某家银行的完整体检单；--report 601128 自动下载年报中报 PDF 并按年份归档，方便你对照前面说的"接口看不到的另一张脸"。
 
 ## 它做不到的事
 

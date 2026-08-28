@@ -17,26 +17,30 @@ description: A股银行股/银行ETF 定量投资分析系统 — 四层框架�
 
 ## 快速开始
 
-```bash
-# 部署（首次）: 建目录 + 复制脚本 + 准备akshare环境
-bash setup.sh
+在克隆的仓库目录里执行安装脚本，Skill 会装进 Claude Code 的 skills 目录：
 
-# 完整分析（约1~3分钟, 42家×2次接口调用）
-cd ~/.bank-skill/scripts
-python3 bank_analysis.py                 # 注意: PEP668环境请用 venv 内的 python
+```bash
+git clone https://github.com/grissomsh/bank-investment-analysis.git
+cd bank-investment-analysis && bash setup.sh
 ```
 
-> 本机约定（同 etf-three-factor）：Homebrew Python 受 PEP 668 限制，setup.sh 会装到 `~/.bank-skill/venv`；已存在 `~/.etf-skill/venv` 时也可直接复用：`~/.etf-skill/venv/bin/python bank_analysis.py`
+安装完成后（SKILL.md/scripts/references 位于 ~/.claude/skills/bank-investment-analysis），重启 Claude Code 即可对话式使用；命令行方式：
+
+```bash
+# 完整分析（约1~3分钟, 42家×2次接口调用）; python 路径以 setup.sh 结尾打印的为准
+~/.claude/skills/bank-investment-analysis/venv/bin/python \
+    ~/.claude/skills/bank-investment-analysis/scripts/bank_analysis.py
+```
 
 ### 子命令
 
 | 功能 | 命令 |
 | --- | --- |
-| 环境自检（跑任何分析前建议先执行） | `python3 bank_analysis.py --healthcheck` |
-| 附带单只个股详析 | `python3 bank_analysis.py --detail 600036` |
-| 不生成 HTML（只要表格+JSON） | `python3 bank_analysis.py --no-html` |
-| 下载定期报告PDF（年报/中报, 按年归档） | `python3 bank_analysis.py --report 601128 [--limit 4]` |
-| 查看本地数据库状态 | `python3 bank_analysis.py --stats` |
+| 环境自检（跑任何分析前建议先执行） | `python3 scripts/bank_analysis.py --healthcheck` |
+| 附带单只个股详析 | `python3 scripts/bank_analysis.py --detail 600036` |
+| 不生成 HTML（只要表格+JSON） | `python3 scripts/bank_analysis.py --no-html` |
+| 下载定期报告PDF（年报/中报, 按年归档） | `python3 scripts/bank_analysis.py --report 601128 [--limit 4]` |
+| 查看本地数据库状态 | `python3 scripts/bank_analysis.py --stats` |
 | 打分模型离线回归 | `python3 tests/test_scoring.py` |
 
 定期报告存放于 `reports/<报告年度>/<代码_简称_年报|中报>.pdf`（巨潮资讯官方PDF，已含去重），是接口层缺失的前瞻资产质量指标（逾期结构/迁徙率/ECL三阶段/分红方案）的唯一来源。
@@ -47,9 +51,9 @@ python3 bank_analysis.py                 # 注意: PEP668环境请用 venv 内�
 
 | 文件 | 位置 | 说明 |
 | --- | --- | --- |
-| HTML报告 | `~/.bank-skill/workspace/银行投资分析.html` | 温度卡 + 全量评分表 + ETF池 |
-| JSON数据 | `~/.bank-skill/workspace/银行投资分析.json` | 全部结构化结果 |
-| SQLite | `~/.bank-skill/workspace/bank_history.db` | 中证官方PE/股息率逐日累积 |
+| HTML报告 | `workspace/银行投资分析.html` | 温度卡 + 全量评分表 + ETF池 |
+| JSON数据 | `workspace/银行投资分析.json` | 全部结构化结果 |
+| SQLite | `workspace/bank_history.db` | 中证官方PE/股息率逐日累积 |
 
 工作区可用环境变量 `BANK_WORKSPACE` 覆盖。
 
@@ -97,7 +101,7 @@ L3 组合: ETF底仓看温度档位 · 个股卫星取高分池 · 控制大行/
 ## 故障排查
 
 ```bash
-python3 bank_analysis.py --healthcheck   # 五路数据源+DB逐一自检, 失败退出码1
+python3 scripts/bank_analysis.py --healthcheck   # 全部数据源+DB逐一自检, 失败退出码1
 ```
 
 - **财务数据大面积失败** → 多为网络/代理问题（东财 datacenter 走代理偶发被风控），可换网络重试；脚本自身每只股票失败会自动重试一次。

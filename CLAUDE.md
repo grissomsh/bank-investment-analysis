@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-A股银行投资定量分析系统 (A-share bank investment analysis) — a four-layer quantitative framework for bank stock / bank ETF investing: data layer → sector temperature (ETF timing) → per-bank five-dimension cross-sectional scoring → portfolio hints. This repo is the source for a Claude Code skill; scripts deploy to `~/.bank-skill/scripts/` via `setup.sh` and the workspace resolves to `~/.bank-skill/workspace` at runtime (env `BANK_WORKSPACE` overrides).
+A股银行投资定量分析系统 (A-share bank investment analysis) — a four-layer quantitative framework for bank stock / bank ETF investing: data layer → sector temperature (ETF timing) → per-bank five-dimension cross-sectional scoring → portfolio hints. This repo is the source for a Claude Code skill; setup.sh installs the skill (SKILL.md + scripts + references) into `~/.claude/skills/bank-investment-analysis`, where Claude Code picks it up; runtime artifacts land in that install dir.s `workspace/` (env `BANK_WORKSPACE` overrides).
 
 ## Commands
 
@@ -15,13 +15,13 @@ python3 scripts/bank_analysis.py                    # full pipeline: fetch → t
 python3 scripts/bank_analysis.py --detail 600036    # additionally print one bank's metric detail block
 python3 scripts/bank_analysis.py --no-html          # skip HTML report
 python3 scripts/bank_analysis.py --report 601128    # download annual/interim report PDFs (cninfo) into reports/<fiscal-year>/
-python3 scripts/bank_analysis.py --healthcheck      # probe all six data sources + SQLite, exit 1 on failure
+python3 scripts/bank_analysis.py --healthcheck      # probe all data sources + SQLite, exit 1 on failure
 python3 scripts/bank_analysis.py --stats            # local csindex archive status
-bash setup.sh                                       # deploy to ~/.bank-skill (reuses ~/.etf-skill/venv when present)
-python3 tests/test_scoring.py                       # offline scoring regression (62 checks, no network)
+bash setup.sh                                       # install into ~/.claude/skills/ (reuses ~/.etf-skill/venv when present)
+python3 tests/test_scoring.py                       # offline scoring regression (76 checks, no network)
 ```
 
-**On this machine**: Homebrew Python is PEP 668-externally-managed. Use an existing venv with akshare — `~/.etf-skill/venv/bin/python` (from the etf-three-factor skill) or `~/.bank-skill/venv` created by setup.sh.
+**On this machine**: Homebrew Python is PEP 668-externally-managed. Use an existing venv with akshare — `~/.etf-skill/venv/bin/python` (from the etf-three-factor skill) or the `venv/` inside the skill dir created by setup.sh.
 
 ## Architecture
 

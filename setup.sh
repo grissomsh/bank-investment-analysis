@@ -1,46 +1,50 @@
 #!/usr/bin/env bash
 # ============================================================
-# 银行投资分析 skill 一键部署脚本
-# 用法: bash setup.sh
-# 功能: 建目录 → 复制脚本 → 准备akshare环境 → 打印使用说明
+# 银行投资分析 Skill 安装脚本
+# 流程: git clone 本仓库(任意位置) → bash setup.sh
+#       脚本会把 SKILL.md / scripts/ / references/ 安装到
+#       Claude Code 的 skills 目录: ~/.claude/skills/bank-investment-analysis
+#       之后在 Claude Code 里对话即可使用, 也可以命令行直接跑
+# 运行产物(HTML/JSON/SQLite/reports)统一落在安装目录的 workspace/
+# 环境变量: CLAUDE_SKILLS_DIR 覆盖 skills 根目录, BANK_PYPI_MIRROR 覆盖 pip 镜像
 # ============================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SKILL_HOME="${BANK_SKILL_HOME:-$HOME/.bank-skill}"
-SCRIPTS_DIR="$SKILL_HOME/scripts"
-WORKSPACE_DIR="$SKILL_HOME/workspace"
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILLS_ROOT="${CLAUDE_SKILLS_DIR:-$HOME/.claude/skills}"
+TARGET="$SKILLS_ROOT/bank-investment-analysis"
 PYPI_MIRROR="${BANK_PYPI_MIRROR:-https://mirrors.aliyun.com/pypi/simple/}"
+VENV_DIR="$TARGET/venv"
 
-echo "🏦 银行投资分析 skill 部署"
-echo "  目标目录: $SKILL_HOME"
+echo "🏦 银行投资分析 Skill 安装"
+echo "  源:   $SOURCE_DIR"
+echo "  目标: $TARGET"
 echo ""
 
-mkdir -p "$SCRIPTS_DIR" "$WORKSPACE_DIR"
-echo "✅ 脚本目录: $SCRIPTS_DIR"
-echo "✅ 工作区:   $WORKSPACE_DIR"
+# 1. 安装 Skill 文件 (workspace 保留, 幂等覆盖)
+mkdir -p "$TARGET/workspace" "$TARGET/scripts" "$TARGET/references"
+cp "$SOURCE_DIR/SKILL.md" "$TARGET/"
+cp "$SOURCE_DIR"/scripts/*.py "$TARGET/scripts/"
+cp "$SOURCE_DIR"/references/*.md "$TARGET/references/"
+echo "✅ 已安装: SKILL.md + scripts/ + references/ (workspace/ 保留原数据)"
 
-cp "$SCRIPT_DIR/scripts/bank_analysis.py" "$SCRIPTS_DIR/"
-cp "$SCRIPT_DIR/scripts/bank_universe.py" "$SCRIPTS_DIR/"
-cp "$SCRIPT_DIR/scripts/bank_data_store.py" "$SCRIPTS_DIR/"
-echo "✅ 脚本已复制: bank_analysis.py + bank_universe.py + bank_data_store.py"
-
+# 2. python + akshare 环境
+#    优先级: 安装目录venv > 复用其他skill的venv > 系统 > pip安装 > 自建venv (PEP668兜底)
+PY_BIN="python3"
 if ! command -v python3 >/dev/null 2>&1; then
     echo "❌ 未找到 python3, 请先安装 Python 3.7+"
     exit 1
 fi
 echo "✅ Python: $(python3 --version)"
 
-# akshare 环境: 复用已有的 etf-skill venv > 系统 > 自建 venv (PEP668 兜底)
-VENV_DIR="$SKILL_HOME/venv"
-PY_BIN="python3"
-if [ -x "$HOME/.etf-skill/venv/bin/python" ] && \
-   "$HOME/.etf-skill/venv/bin/python" -c "import akshare" 2>/dev/null; then
+if [ -x "$VENV_DIR/bin/python" ] && \
+   "$VENV_DIR/bin/python" -c "import akshare" 2>/dev/null; then
+    PY_BIN="$VENV_DIR/bin/python"
+    echo "✅ 使用已装虚拟环境: $VENV_DIR"
+elif [ -x "$HOME/.etf-skill/venv/bin/python" ] && \
+     "$HOME/.etf-skill/venv/bin/python" -c "import akshare" 2>/dev/null; then
     PY_BIN="$HOME/.etf-skill/venv/bin/python"
     echo "✅ 复用已有虚拟环境: $HOME/.etf-skill/venv"
-elif [ -x "$VENV_DIR/bin/python" ]; then
-    PY_BIN="$VENV_DIR/bin/python"
-    echo "✅ 使用虚拟环境: $VENV_DIR"
 elif python3 -c "import akshare" 2>/dev/null; then
     AK_VER=$(python3 -c "import akshare; print(getattr(akshare, '__version__', '?'))" 2>/dev/null || echo "?")
     echo "✅ akshare 已安装 (v$AK_VER)"
@@ -57,9 +61,16 @@ fi
 
 echo ""
 echo "=================================================="
-echo "🎉 部署完成! 常用命令:"
-echo "  cd $SCRIPTS_DIR"
-echo "  $PY_BIN bank_analysis.py --healthcheck   # 环境自检 (推荐先跑)"
-echo "  $PY_BIN bank_analysis.py                 # 完整分析"
-echo "  $PY_BIN bank_analysis.py --detail 600036 # 附带单只详析"
-echo "  回归测试: python3 tests/test_scoring.py (在源码目录)"
+echo "🎉 安装完成! 后续命令里的 python 均指: $PY_BIN"
+echo ""
+echo "Claude Code 对话式 (推荐): 重启 Claude Code 后直接说"
+echo "  \"跑一下今天的银行分析\" / \"给招商银行做个体检\""
+echo ""
+echo "命令行方式:"
+echo "  $PY_BIN $TARGET/scripts/bank_analysis.py --healthcheck   # 环境自检 (推荐先跑)"
+echo "  $PY_BIN $TARGET/scripts/bank_analysis.py                 # 完整分析 (收盘后)"
+echo "  $PY_BIN $TARGET/scripts/bank_analysis.py --detail 600036 # 单只详析"
+echo "  $PY_BIN $TARGET/scripts/bank_analysis.py --report 601128 # 下载年报/中报"
+echo ""
+echo "报告与数据: $TARGET/workspace/"
+echo "回归测试:   python3 tests/test_scoring.py (在源码仓库目录)"

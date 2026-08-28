@@ -13,7 +13,11 @@
 import os
 import sqlite3
 
-WORKSPACE = os.path.expanduser(os.environ.get("BANK_WORKSPACE", "~/.bank-skill/workspace"))
+# Claude Code Skill 就地运行: 工作区默认在 skill 根目录下的 workspace/,
+# 环境变量 BANK_WORKSPACE 可覆盖
+SKILL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WORKSPACE = os.environ.get(
+    "BANK_WORKSPACE", os.path.join(SKILL_ROOT, "workspace"))
 DB_PATH = os.path.join(WORKSPACE, "bank_history.db")
 
 
