@@ -253,5 +253,25 @@ check("1年周期有值", ic["y1"] is not None)
 short = index_changes([100.0, 105.0], ["2026-08-27", "2026-08-28"], today=_dt(2026, 8, 28))
 check("短序列缺周期为None", short["d1"] == 5.0 and short["y1"] is None)
 
+print("\n[15] pick_financial_row 新披露期字段缺失回退")
+import pandas as pd  # noqa: E402
+from bank_analysis import pick_financial_row  # noqa: E402
+df = pd.DataFrame([
+    {"REPORT_DATE": "2026-06-30", "REPORT_DATE_NAME": "2026中报",
+     "ROEJQ": 6.7, "NONPERLOAN": float("nan"), "BLDKBBL": float("nan")},
+    {"REPORT_DATE": "2026-03-31", "REPORT_DATE_NAME": "2026一季报",
+     "ROEJQ": 3.4, "NONPERLOAN": 0.94, "BLDKBBL": 387.8},
+])
+check("最新期缺专项字段→回退上一期", pick_financial_row(df)["REPORT_DATE_NAME"] == "2026一季报")
+check("升序排列同样取最近齐全期",
+      pick_financial_row(df.iloc[::-1].reset_index(drop=True))["REPORT_DATE_NAME"] == "2026一季报")
+df_full = pd.DataFrame([
+    {"REPORT_DATE": "2026-06-30", "REPORT_DATE_NAME": "2026中报",
+     "ROEJQ": 6.7, "NONPERLOAN": 0.75, "BLDKBBL": 431.9},
+    {"REPORT_DATE": "2026-03-31", "REPORT_DATE_NAME": "2026一季报",
+     "ROEJQ": 3.4, "NONPERLOAN": 0.75, "BLDKBBL": 438.0},
+])
+check("字段齐全时取最新期", pick_financial_row(df_full)["REPORT_DATE_NAME"] == "2026中报")
+
 print(f"\n===== 结果: {PASS} PASS / {FAIL} FAIL =====")
 sys.exit(1 if FAIL else 0)

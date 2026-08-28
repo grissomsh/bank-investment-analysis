@@ -392,8 +392,24 @@ def enrich_with_prev_year_cov(df, row):
     return row
 
 
+def pick_financial_row(df):
+    """选行策略: 优先最新一期; 若最新期银行专项字段全空(新披露后EM尚未回填),
+    回退到最近一个字段齐全的报告期, 避免截面被NaN静默降级。"""
+    def has_bank_fields(i):
+        r = df.iloc[i]
+        return any(_num(r.get(k)) is not None
+                   for k in ("NONPERLOAN", "BLDKBBL", "HXYJBCZL"))
+    idx = 0
+    if not has_bank_fields(0):
+        for i in range(1, len(df)):
+            if has_bank_fields(i):
+                idx = i
+                break
+    return df.iloc[idx].to_dict()
+
+
 def fetch_financial(code, retries=2):
-    """东财F10主要指标(含银行专项字段): 返回最新一期 dict 或 None。
+    """东财F10主要指标(含银行专项字段): 返回最新可用一期 dict 或 None。
     附带 拨备覆盖率同比变化(pp)。"""
     for attempt in range(retries):
         try:
@@ -402,7 +418,7 @@ def fetch_financial(code, retries=2):
                 symbol=secucode(code), indicator="按报告期")
             if df is None or len(df) == 0:
                 return None
-            return enrich_with_prev_year_cov(df, parse_financial_row(df.iloc[0].to_dict()))
+            return enrich_with_prev_year_cov(df, parse_financial_row(pick_financial_row(df)))
         except Exception:
             if attempt == retries - 1:
                 return None
