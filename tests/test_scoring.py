@@ -158,7 +158,7 @@ from bank_universe import PB_PCTILE_MAP as _M_PB, SPREAD_MAP as _M_SP  # noqa: E
 t = sector_temperature(pb_pctile=15, spread_pts=2.8, mom_dev_pct=-12.0)
 exp_pb = round(linear_map(15, _M_PB, floor=5, cap=98), 1)      # 实现先取整子分再合成
 exp_sp = round(linear_map(2.8, _M_SP, floor=0, cap=100), 1)
-mom = round(max(5, min(95, 50 + (-12.0) * 125)), 1)
+mom = round(max(5, min(95, 50 + (-12.0) * 1.25)), 1)           # 偏离百分点×1.25
 expected = round(exp_pb * .5 + exp_sp * .35 + mom * .15, 1)
 check("三因子合成正确", t["温度分"] == expected and t["有效因子"] == ["pb", "spread", "momentum"])
 t2 = sector_temperature(pb_pctile=15, spread_pts=None, mom_dev_pct=None)   # 仅PB可用
@@ -166,8 +166,10 @@ check("仅PB可用时权重重归一且温度≈PB子分",
       abs(t2["温度分"] - exp_pb) < 0.05 and t2["子分"]["利差分"] is None)
 t3 = sector_temperature(None, None, None)
 check("全因子缺失→温度None不崩溃", t3["温度分"] is None)
-t4 = sector_temperature(50, 1.0, 60.0)
+t4 = sector_temperature(50, 1.0, 200.0)
 check("动量钳制上限95", t4["子分"]["动量分"] == 95)
+t6 = sector_temperature(None, None, -0.65)     # 轻微低于均线应接近中性(修复前被放大100倍)
+check("微小偏离不再触发极值", t6["子分"]["动量分"] == round(50 + (-0.65) * 1.25, 1))
 t5 = sector_temperature(None, -1.0, None)
 check("利差为负被钳为最低档0分", t5["子分"]["利差分"] == 0)
 lvl_ok = sector_temperature(90, 2.6, 0)["温度分"] == sector_temperature(90, 2.6, 0)["温度分"]
