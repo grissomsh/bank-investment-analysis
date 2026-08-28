@@ -24,6 +24,9 @@ def _connect():
         date TEXT PRIMARY KEY,
         pe_static REAL, pe_ttm REAL,
         div_yield_1 REAL, div_yield_2 REAL)""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS etf_shares (
+        date TEXT, code TEXT, shares REAL,
+        PRIMARY KEY (date, code))""")
     return conn
 
 
@@ -43,11 +46,46 @@ def load_csindex():
     return rows
 
 
+def upsert_etf_shares(rows):
+    """rows: [(date 'YYYY-MM-DD', code, shares), ...] — 幂等写入"""
+    conn = _connect()
+    with conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO etf_shares VALUES (?,?,?)", rows)
+    conn.close()
+
+
+def load_etf_shares(code=None):
+    """按日期升序返回 [(date, code, shares)]; 指定 code 则只取该 ETF"""
+    conn = _connect()
+    if code:
+        rows = conn.execute(
+            "SELECT date, code, shares FROM etf_shares WHERE code=? ORDER BY date",
+            (code,)).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT date, code, shares FROM etf_shares ORDER BY date").fetchall()
+    conn.close()
+    return rows
+
+
+def etf_share_dates():
+    conn = _connect()
+    rows = [r[0] for r in conn.execute(
+        "SELECT DISTINCT date FROM etf_shares").fetchall()]
+    conn.close()
+    return set(rows)
+
+
 def stats():
     conn = _connect()
     n = conn.execute("SELECT COUNT(*), MIN(date), MAX(date) FROM csindex_value").fetchone()
+    m = conn.execute(
+        "SELECT COUNT(*), MIN(date), MAX(date), COUNT(DISTINCT code) FROM etf_shares").fetchone()
     conn.close()
-    return {"csindex_rows": n[0], "first": n[1], "last": n[2], "db_path": DB_PATH}
+    return {"csindex_rows": n[0], "first": n[1], "last": n[2], "db_path": DB_PATH,
+            "etf_shares_rows": m[0], "etf_first": m[1], "etf_last": m[2],
+            "etf_codes": m[3]}
 
 
 if __name__ == "__main__":

@@ -222,5 +222,16 @@ check("英文版不可下载", parse_report_meta("2025年年度报告(英文版)
 check("非定期报告不可下载", parse_report_meta("年报信息披露重大差错责任追究办法")[2] is False)
 check("无法解析年度→不可下载", parse_report_meta("季度报告")[2] is False)
 
+print("\n[12] share_change_stats 份额变化统计")
+from bank_analysis import share_change_stats  # noqa: E402
+s = {f"2026-08-{d:02d}": 1e8 * (1.0 + i * 0.01) for i, d in enumerate([17, 18, 19, 20, 21, 24, 25, 26])}
+st = share_change_stats(s)
+check("最新日期与份额亿份", st["date"] == "2026-08-26" and st["shares_yi"] == 1.07)
+check("日Δ≈+0.94%", abs(st["day_chg_pct"] - (1.07 / 1.06 - 1) * 100) < 0.01)
+check("5日Δ≈+4.9%", abs(st["d5_chg_pct"] - (1.07 / 1.02 - 1) * 100) < 0.02)
+check("空序列安全", share_change_stats({})["n"] == 0 and share_change_stats({})["day_chg_pct"] is None)
+s2 = {"2026-08-26": 5e8}
+check("单点无变化率", share_change_stats(s2)["day_chg_pct"] is None and share_change_stats(s2)["n"] == 1)
+
 print(f"\n===== 结果: {PASS} PASS / {FAIL} FAIL =====")
 sys.exit(1 if FAIL else 0)

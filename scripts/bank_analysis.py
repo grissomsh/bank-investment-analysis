@@ -44,7 +44,8 @@ from bank_universe import (
     secucode, tcode,
 )
 import bank_data_store
-from bank_data_store import WORKSPACE, upsert_csindex, load_csindex
+from bank_data_store import WORKSPACE, upsert_csindex, load_csindex, \
+    upsert_etf_shares, load_etf_shares, etf_share_dates
 
 SSL_CTX = ssl.create_default_context()
 SSL_CTX.check_hostname = False
@@ -609,9 +610,14 @@ def run(detail_code=None, make_html=True):
         "banks": [{k: v for k, v in r.items() if not str(k).startswith("_")} for r in ranked],
         "top10_type_mix": type_top,
     }
-    report["etfs"] = [
-        {**e, "ma250_dev_pct": ma_dev_pct(fetch_kline(tcode(e["code"]), 320), 250)}
-        for e in fetch_bank_etfs()]
+    etf_pool = fetch_bank_etfs()
+    trade_dates_desc = [k["date"] for k in idx_kline[::-1]][:25]
+    shares_map = update_etf_shares([e["code"] for e in etf_pool], trade_dates_desc)
+    report["etfs"] = []
+    for e in etf_pool:
+        st = share_change_stats(shares_map.get(e["code"], {}))
+        e.update(ma250_dev_pct=ma_dev_pct(fetch_kline(tcode(e["code"]), 320), 250), **st)
+        report["etfs"].append(e)
 
     os.makedirs(WORKSPACE, exist_ok=True)
     with open(JSON_OUT, "w", encoding="utf-8") as f:
@@ -619,6 +625,12 @@ def run(detail_code=None, make_html=True):
     print(f"\n📄 JSON已写入 {JSON_OUT}")
 
     print_table(ranked)
+    if report["etfs"]:
+        print("\n===== ETF份额追踪(一级市场申赎, 交易所口径) =====")
+        for e in report["etfs"][:3]:
+            print(f"  {e['code']} {e['name']}: 份额 {e.get('shares_yi') or '—'}亿份 | "
+                  f"日Δ {_fmt(e.get('day_chg_pct'), '%')} | 5日Δ {_fmt(e.get('d5_chg_pct'), '%')}"
+                  f" (样本{e.get('n')}日, 最新{e.get('date') or '—'})")
     if make_html:
         with open(HTML_OUT, "w", encoding="utf-8") as f:
             f.write(gen_html(report))
@@ -767,9 +779,13 @@ PE动态 = 总市值 ÷ 最新报告期年化归母净利。
 <div class="card">
 <h2>💰 银行ETF池（名称含“银行”按规模Top8动态发现）</h2>
 <table><tr><th>代码</th><th>名称</th><th>现价</th><th>IOPV溢价</th><th>MA250偏离</th>
+<th>份额(亿份)</th><th>份额日Δ</th><th>份额5日Δ</th>
 <th>市值(亿)</th><th>今日成交(亿)</th></tr>
 @ETFROWS@
-</table></div>
+</table>
+<p style="color:#98a2b3;font-size:11px;margin:8px 0 0">
+份额=一级市场申赎余额(交易所官方口径, 交易日盘后约19:00发布), 净申购代表配置资金流入、
+净赎回代表浮盈兑现; 与二级市场量价相互独立。份额列自本地落库起累积, 冷启动期累计变化为空属正常。</p></div>
 
 <div class="foot">数据源：东方财富F10(银行专项财务)·东财估值史·中证指数公司·腾讯财经·国债收益率曲线
 —— 量化研究工具, 全部输出不构成投资建议。</div>
@@ -825,12 +841,20 @@ def gen_html(rep):
 
     etf_rows = []
     for e in rep["etfs"]:
+        chg = e.get("day_chg_pct")
+        chg_txt = "—"
+        if isinstance(chg, (int, float)):
+            cc = "#c2410c" if chg > 0 else ("#1d4ed8" if chg < 0 else "#98a2b3")
+            chg_txt = f"<span style='color:{cc}'>{chg:+.2f}%</span>"
+        d5 = e.get("d5_chg_pct")
         etf_rows.append(
             "<tr><td class='mono'>%s</td><td>%s</td><td>%s</td><td>%s</td>"
-            "<td>%s</td><td>%s</td><td>%s</td></tr>" % (
+            "<td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
+            "<td>%s</td><td>%s</td></tr>" % (
                 esc(e["code"]), esc(e["name"]),
                 _fmt(e.get("price")), _fmt(e.get("premium_pct"), "%"),
                 _fmt(e.get("ma250_dev_pct"), "%"),
+                _fmt(e.get("shares_yi")), chg_txt, _fmt(d5, "%"),
                 "%.0f" % e["scale_yi"] if e.get("scale_yi") else "—",
                 "%.0f" % e["turnover_yi"] if e.get("turnover_yi") else "—"))
 
@@ -861,6 +885,90 @@ def gen_html(rep):
             .replace("@BANKROWS@", "\n".join(bank_rows))
             .replace("@ETFROWS@", "\n".join(etf_rows)))
     return html
+
+
+# ============================================================
+# ETF 份额追踪（一级市场申赎, 交易所官方口径, 盘后约19:00发布）
+# ============================================================
+
+_SSE_SHARES_CACHE = {}   # 'YYYYMMDD' -> {code: shares} 或 None(当日无数据)
+
+
+def fetch_sse_shares(date_compact):
+    """上交所全市场ETF份额(当日一次请求), 返回 {code: shares} 或 None"""
+    if date_compact in _SSE_SHARES_CACHE:
+        return _SSE_SHARES_CACHE[date_compact]
+    try:
+        import akshare as ak
+        df = ak.fund_etf_scale_sse(date=date_compact)
+        out = {str(r["基金代码"]): float(r["基金份额"])
+               for _, r in df.iterrows()}
+        _SSE_SHARES_CACHE[date_compact] = out
+        return out
+    except Exception:
+        _SSE_SHARES_CACHE[date_compact] = None
+        return None
+
+
+def fetch_szse_shares_range(start, end):
+    """深交所ETF份额(区间一次请求), 返回 {'YYYY-MM-DD': {code: shares}}"""
+    try:
+        import akshare as ak
+        df = ak.fund_scale_daily_szse(start_date=start, end_date=end)
+        out = {}
+        for _, r in df.iterrows():
+            d = str(r["日期"])[:10]
+            out.setdefault(d, {})[str(r["基金代码"])] = float(r["基金份额"])
+        return out
+    except Exception:
+        return {}
+
+
+def update_etf_shares(etf_codes, trade_dates_desc, max_backfill=15):
+    """把缺失交易日的份额落库(每运行最多回补 max_backfill 天), 返回
+    {code: {date: shares}} 全量序列。trade_dates_desc 为 'YYYY-MM-DD' 降序。"""
+    have = etf_share_dates()
+    missing = [d for d in trade_dates_desc if d not in have][:max_backfill]
+    if missing:
+        # 上交所: 逐日请求; 深交所: 一次区间请求
+        szse_map = {}
+        szse_codes = [c for c in etf_codes if c.startswith(("1",))]
+        if szse_codes:
+            lo, hi = min(missing), max(missing)
+            szse_map = fetch_szse_shares_range(lo, hi)
+        rows = []
+        for d in missing:
+            sse = fetch_sse_shares(d.replace("-", ""))
+            for c in etf_codes:
+                v = None
+                if c.startswith(("5",)) and sse:
+                    v = sse.get(c)
+                elif c.startswith(("1",)) and szse_map.get(d):
+                    v = szse_map[d].get(c)
+                if v:
+                    rows.append((d, c, v))
+        if rows:
+            upsert_etf_shares(rows)
+    out = {}
+    for d, c, v in load_etf_shares():
+        out.setdefault(c, {})[d] = v
+    return out
+
+
+def share_change_stats(series):
+    """纯计算: series {date: shares} → dict(日期, 份额亿份, 日Δ%, 5日Δ%, 样本数)。
+    份额单位以接口原值折算为亿份(1e8)。"""
+    if not series:
+        return {"date": None, "shares_yi": None, "day_chg_pct": None,
+                "d5_chg_pct": None, "n": 0}
+    dates = sorted(series)
+    vals = [series[d] for d in dates]
+    latest, n = vals[-1], len(vals)
+    day_pct = (vals[-1] / vals[-2] - 1) * 100 if n >= 2 and vals[-2] else None
+    d5_pct = (vals[-1] / vals[-6] - 1) * 100 if n >= 6 and vals[-6] else None
+    rd = lambda x: round(x, 2) if x is not None else None
+    return {"date": dates[-1], "shares_yi": round(latest / 1e8, 2),
+            "day_chg_pct": rd(day_pct), "d5_chg_pct": rd(d5_pct), "n": n}
 
 
 # ============================================================
@@ -949,6 +1057,19 @@ def healthcheck():
             print(f"❌ {name}: {type(e).__name__} {str(e)[:120]}")
 
     step("腾讯K线", lambda: f"{len(fetch_kline(INDEX_TCODE, 5))}根")
+
+    def _sse_shares():
+        kl = fetch_kline(INDEX_TCODE, 5)
+        if not kl:
+            raise RuntimeError("无交易日参照")
+        recent = [k["date"] for k in kl][::-1]
+        for d in recent:                      # 逐日回退找最近一个有数据的交易日
+            got = fetch_sse_shares(d.replace("-", ""))
+            if got:
+                return f"{d} 全市场{len(got)}只"
+        raise RuntimeError("近5个交易日均无份额数据(盘后19:00前属正常)")
+
+    step("上交所ETF份额", _sse_shares)
 
     def _cs():
         rows = fetch_csindex_valuation()
