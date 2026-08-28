@@ -25,6 +25,7 @@ import argparse
 import json
 import math
 import os
+import re
 import ssl
 import sys
 import time
@@ -316,8 +317,27 @@ def parse_financial_row(r):
     }
 
 
+def enrich_with_prev_year_cov(df, row):
+    """用上年同期的拨备覆盖率计算同比变化(pp)。
+    df 为按报告期接口的全量DataFrame(REPORT_DATE降序), row 为 parse_financial_row 结果。"""
+    try:
+        rd = row.get("_report_date") or ""
+        prev_key = f"{int(rd[:4]) - 1}{rd[4:]}"
+        m = df["REPORT_DATE"].astype(str).str.startswith(prev_key)
+        if m.any():
+            prev_cov = _num(df[m].iloc[0].get("BLDKBBL"))
+            cur_cov = row.get("provision_cov")
+            if prev_cov is not None and cur_cov is not None:
+                chg = round(cur_cov - prev_cov, 1)
+                row["provision_cov_chg"] = 0.0 if chg == 0 else chg  # 避免 -0.0
+    except Exception:
+        pass
+    return row
+
+
 def fetch_financial(code, retries=2):
-    """东财F10主要指标(含银行专项字段): 返回最新一期 dict 或 None"""
+    """东财F10主要指标(含银行专项字段): 返回最新一期 dict 或 None。
+    附带 拨备覆盖率同比变化(pp)。"""
     for attempt in range(retries):
         try:
             import akshare as ak
@@ -325,12 +345,35 @@ def fetch_financial(code, retries=2):
                 symbol=secucode(code), indicator="按报告期")
             if df is None or len(df) == 0:
                 return None
-            return parse_financial_row(df.iloc[0].to_dict())
+            return enrich_with_prev_year_cov(df, parse_financial_row(df.iloc[0].to_dict()))
         except Exception:
             if attempt == retries - 1:
                 return None
             time.sleep(1.0)
     return None
+
+
+def fetch_dividend_payout(code, np_annualized, window_days=380):
+    """近window_days天实施的现金分红总额 ÷ 年化归母净利 = 分红率(%)。
+    口径说明: 滚动12个月实施口径(含中期分红), 非财年宣告口径; 无分红窗口返回0。"""
+    if not np_annualized or np_annualized <= 0:
+        return None
+    try:
+        from datetime import datetime, timedelta
+        import akshare as ak
+        df = ak.stock_fhps_detail_em(symbol=code)
+        if df is None or len(df) == 0:
+            return None
+        rows = df[df["方案进度"] == "实施分配"].dropna(
+            subset=["除权除息日", "现金分红-现金分红比例", "总股本"])
+        cutoff = (datetime.now() - timedelta(days=window_days)).strftime("%Y-%m-%d")
+        rows = rows[rows["除权除息日"].astype(str).str[:10] >= cutoff]
+        total = sum(
+            float(r["现金分红-现金分红比例"]) / 10 * float(r["总股本"])
+            for _, r in rows.iterrows())
+        return round(total / np_annualized * 100, 1)
+    except Exception:
+        return None
 
 
 def fetch_valuation_history(code):
@@ -486,6 +529,8 @@ def run(detail_code=None, make_html=True):
     raw_rows = []
     for i, c in enumerate(codes, 1):
         fin = fetch_financial(c)
+        if fin and fin.get("_np_annualized"):
+            fin["payout_ratio"] = fetch_dividend_payout(c, fin["_np_annualized"])
         fin_ok += 1 if fin else 0
         ser, cur = fetch_valuation_history(c)
         val_ok += 1 if (ser and cur) else 0
@@ -602,8 +647,10 @@ def format_detail(d):
     fields = [("年化加权ROE%", "roe_annualized"), ("年化ROA%", "roa_annualized"),
               ("净息差%", "nim"), ("成本收入比%", "cost_income"),
               ("不良率%", "npl_ratio"), ("拨备覆盖率%", "provision_cov"),
-              ("拨贷比%", "loan_provision"), ("核心一级资本充足率%", "cet1"),
+              ("拨备覆盖率同比pp", "provision_cov_chg"), ("拨贷比%", "loan_provision"),
+              ("核心一级资本充足率%", "cet1"),
               ("营收同比%", "revenue_yoy"), ("归母净利同比%", "profit_yoy"),
+              ("分红率%(近12M实施)", "payout_ratio"),
               ("每股净资产", "bps"), ("PB自身历史分位", "pb_self_pctile"),
               ("相对板块PB溢价%", "pb_vs_sector"), ("PB÷年化ROE", "pb_roe")]
     for label, key in fields:
@@ -625,14 +672,14 @@ def _pad(s, width):
     return out + " " * max(0, width - disp)
 
 
-COLW = [4, 9, 7, 7, 6, 4, 6, 6, 6, 6, 6, 6, 15, 7, 7, 6, 7, 11]
+COLW = [4, 9, 7, 7, 6, 4, 6, 6, 6, 6, 6, 6, 15, 7, 7, 6, 7, 8, 6, 11]
 
 
 def print_table(ranked):
     print("\n===== 个股五维评分(截面分位打分, 0-100) | 现价/PE为行情参考列 =====")
     hdr = ["排名", "名称", "代码", "类别", "总分", "档位",
            "盈利", "质量", "成长", "资本", "估值", "PB",
-           "现价(涨跌%)", "PETTM", "PE动", "不良%", "覆盖%", "报告期"]
+           "现价(涨跌%)", "PETTM", "PE动", "不良%", "覆盖%", "拨备Δ", "分红%", "报告期"]
     print(" ".join(_pad(h, w) for h, w in zip(hdr, COLW)))
     for i, r in enumerate(ranked, 1):
         dm = r["维度分"]
@@ -643,9 +690,12 @@ def print_table(ranked):
             cells.append(f"{v:g}" if isinstance(v, (int, float)) else "—")
         px = (_fmt(r.get("close")) +
               (f"({_fmt(r.get('chg_pct'), '%')})" if r.get("chg_pct") is not None else ""))
+        chg_cov = r.get("provision_cov_chg")
         cells += [_fmt(r.get("pb"), "pb"), px,
                   _fmt(r.get("pe_ttm")), _fmt(r.get("pe_dyn")),
                   _fmt(r.get("npl_ratio")), _fmt(r.get("provision_cov")),
+                  _fmt(chg_cov, "pp") if chg_cov is not None else "—",
+                  _fmt(r.get("payout_ratio")),
                   r.get("报告期") or "—"]
         mark = " ⚠️" if r.get("告警") else ""
         print(" ".join(_pad(c, w) for c, w in zip(cells, COLW)) + mark)
@@ -703,14 +753,16 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <h2>📊 L2 个股五维评分（⚠️底色行为触发资产质量降档）</h2>
 <table><tr><th>#</th><th>银行</th><th>类别</th><th>总分</th><th>档位</th>
 <th>维度分</th><th>现价(涨跌%)</th><th>PE-TTM</th><th>PE动态</th><th>PB</th>
-<th>不良率</th><th>拨备覆盖率</th><th>相对板块PB</th>
-<th>PB自身分位</th><th>告警 / 报告期</th></tr>
+<th>不良率</th><th>拨备覆盖率</th><th>拨备Δ同比</th><th>相对板块PB</th>
+<th>PB自身分位</th><th>分红率</th><th>告警 / 报告期</th></tr>
 @BANKROWS@
 </table>
 <p style="color:#98a2b3;font-size:11px;margin:8px 0 0">
 现价、涨跌幅、PE-TTM、PE动态为行情参考信息，<b>不参与五维评分</b>——
 银行股估值锚定 PB 与 PB÷ROE，PE 受拨备计提与减值扰动较大，仅作交叉观察。
-PE动态 = 总市值 ÷ 最新报告期年化归母净利。</p></div>
+PE动态 = 总市值 ÷ 最新报告期年化归母净利。
+拨备Δ同比(参与资产质量评分) = 拨备覆盖率 − 上年同期，负值为消耗蓄水池；
+分红率(参与估值评分) = 近12个月实施现金分红 ÷ 年化归母净利，含中期分红。</p></div>
 
 <div class="card">
 <h2>💰 银行ETF池（名称含“银行”按规模Top8动态发现）</h2>
@@ -743,12 +795,17 @@ def gen_html(rep):
         if isinstance(chg, (int, float)):
             cls = "#c2410c" if chg > 0 else ("#1d4ed8" if chg < 0 else "#98a2b3")
             px += f" (<span style='color:{cls}'>{chg:+.2f}%</span>)"
+        cc = r.get("provision_cov_chg")
+        cc_txt = num(cc, "{:+.1f}pp") if isinstance(cc, (int, float)) else "—"
+        if isinstance(cc, (int, float)):
+            cc_cls = "#1d4ed8" if cc >= 0 else "#c2410c"
+            cc_txt = f"<span style='color:{cc_cls}'>{cc:+.1f}pp</span>"
         bank_rows.append(
             "<tr%s><td>%d</td><td><b>%s</b><br><span class='mono'>%s</span></td>"
             "<td>%s</td><td class='score'>%.1f</td><td><b>%s</b></td>"
             "<td style='white-space:nowrap'>盈%s 质%s 成%s 资%s 估%s</td>"
             "<td class='mono' style='white-space:nowrap'>%s</td><td>%s</td><td>%s</td>"
-            "<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
+            "<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
             "<td>%s<br><span class='period'>%s</span></td></tr>" % (
                 " class='gate'" if r.get("告警") else "",
                 i, esc(r["name"]), r["code"], esc(r["type"]),
@@ -760,8 +817,10 @@ def gen_html(rep):
                 num(r.get("pb")),
                 num(r.get("npl_ratio"), "{:.2f}%"),
                 num(r.get("provision_cov"), "{:.0f}%"),
+                cc_txt,
                 num(r.get("pb_vs_sector"), "{:+.1f}%"),
                 num(r.get("pb_self_pctile"), "{:.0f}"),
+                num(r.get("payout_ratio"), "{:.1f}%"),
                 warn, esc(r.get("报告期") or "—")))
 
     etf_rows = []
@@ -802,6 +861,77 @@ def gen_html(rep):
             .replace("@BANKROWS@", "\n".join(bank_rows))
             .replace("@ETFROWS@", "\n".join(etf_rows)))
     return html
+
+
+# ============================================================
+# 定期报告 PDF 下载（巨潮资讯 = 沪深交易所法定披露平台）
+# 目录规则: WORKSPACE/reports/<报告年度>/<代码_简称_年报|中报>.pdf
+# ============================================================
+
+def parse_report_meta(title, name_hint=""):
+    """从公告标题提取 (报告年度, 类型年报|中报, 是否可下载)。
+    兼容"2025年年度报告"与"2025年度报告"两种命名;
+    跳过摘要/英文/撤销/更正/补充类公告; 剥离 <em> 高亮标签。"""
+    clean = re.sub(r"</?em>", "", title)
+    if name_hint and name_hint not in clean:
+        pass  # 简称仅为辅助, 不做强校验
+    if any(k in clean for k in ("摘要", "英文", "撤销", "更正", "差错", "办法", "制度", "补充")):
+        return None, None, False
+    m = re.search(r"(\d{4})\s*年?\s*(半)?年度报告", clean)
+    if not m:
+        return None, None, False
+    year = m.group(1)
+    kind = "中报" if m.group(2) else "年报"
+    return year, kind, True
+
+
+def download_reports(code, limit=4):
+    """下载最近 limit 份定期报告(年报/中报)到按年度分类的目录。
+    返回下载/已存在的文件路径列表。"""
+    name = BANKS.get(code, {}).get("n", code)
+    try:
+        import akshare as ak
+        from datetime import datetime as _dt
+        df = ak.stock_zh_a_disclosure_report_cninfo(
+            symbol=code, market="沪深京", keyword="年度报告",
+            start_date="20190101", end_date=_dt.now().strftime("%Y%m%d"))
+    except Exception as e:
+        print(f"❌ 公告列表获取失败: {e}")
+        return []
+    saved = []
+    for _, r in df.iterrows():
+        title = str(r.get("公告标题", ""))
+        year, kind, ok = parse_report_meta(title, name)
+        if not ok or len(saved) >= limit:
+            continue
+        detail = str(r.get("公告链接", ""))
+        mid = re.search(r"announcementId=(\d+)", detail)
+        mtime = re.search(r"announcementTime=([\d-]+)", detail)
+        if not (mid and mtime):
+            continue
+        url = f"http://static.cninfo.com.cn/finalpage/{mtime.group(1)}/{mid.group(1)}.PDF"
+        dest_dir = os.path.join(WORKSPACE, "reports", year)
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, f"{code}_{name}_{year}{kind}.pdf")
+        if os.path.exists(dest):
+            print(f"✓ 已存在 {dest}")
+            saved.append(dest)
+            continue
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=60, context=SSL_CTX) as resp, \
+                    open(dest, "wb") as f:
+                f.write(resp.read())
+            size_mb = os.path.getsize(dest) / 1e6
+            if size_mb < 0.1:
+                os.remove(dest)
+                print(f"⚠️ 文件过小疑似失败, 已删除: {url}")
+                continue
+            print(f"✅ {dest} ({size_mb:.1f}MB)")
+            saved.append(dest)
+        except Exception as e:
+            print(f"⚠️ 下载失败 {url}: {e}")
+    return saved
 
 
 # ============================================================
@@ -854,6 +984,9 @@ if __name__ == "__main__":
     ap.add_argument("--no-html", action="store_true", help="不生成HTML报告")
     ap.add_argument("--healthcheck", action="store_true", help="环境自检")
     ap.add_argument("--stats", action="store_true", help="本地数据库状态")
+    ap.add_argument("--report", metavar="CODE",
+                    help="下载该行最近定期报告(年报/中报)PDF, 按年度归档到 reports/<年份>/")
+    ap.add_argument("--limit", type=int, default=4, help="--report 最多下载份数 (默认4)")
     args = ap.parse_args()
 
     if args.healthcheck:
@@ -862,6 +995,8 @@ if __name__ == "__main__":
         s = bank_data_store.stats()
         print(f"DB: {s['db_path']}\ncsindex_value: {s['csindex_rows']} 行 ({s['first']} ~ {s['last']})")
         sys.exit(0)
+    if args.report:
+        sys.exit(0 if download_reports(args.report.strip(), args.limit) else 1)
 
     rc = run(detail_code=args.detail, make_html=not args.no_html)
     sys.exit(0 if rc else 1)

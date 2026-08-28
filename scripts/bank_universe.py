@@ -103,9 +103,10 @@ WEIGHTS = {
     "资产质量": {  # 资产质量决定报表净资产与ROE的"真实性"
         "w": 0.25,
         "items": {
-            "npl_ratio":        {"wt": 0.40, "低优": True,  "名": "不良贷款率%"},
-            "provision_cov":    {"wt": 0.45, "低优": False, "名": "拨备覆盖率%"},
-            "loan_provision":   {"wt": 0.15, "低优": False, "名": "拨贷比%"},
+            "npl_ratio":         {"wt": 0.35, "低优": True,  "名": "不良贷款率%"},
+            "provision_cov":     {"wt": 0.35, "低优": False, "名": "拨备覆盖率%"},
+            "loan_provision":    {"wt": 0.10, "低优": False, "名": "拨贷比%"},
+            "provision_cov_chg": {"wt": 0.20, "低优": False, "名": "拨备覆盖率同比变化pp"},
         },
     },
     "成长性": {
@@ -124,9 +125,10 @@ WEIGHTS = {
     "估值吸引力": {  # PB对ROE的匹配是银行定价第一性原理
         "w": 0.20,
         "items": {
-            "pb_self_pctile":   {"wt": 0.35, "低优": True,  "名": "PB自身历史分位"},
-            "pb_vs_sector":     {"wt": 0.35, "低优": True,  "名": "相对板块PB溢价%"},
-            "pb_roe":           {"wt": 0.30, "低优": True,  "名": "PB÷年化ROE"},
+            "pb_self_pctile":   {"wt": 0.30, "低优": True,  "名": "PB自身历史分位"},
+            "pb_vs_sector":     {"wt": 0.25, "低优": True,  "名": "相对板块PB溢价%"},
+            "pb_roe":           {"wt": 0.25, "低优": True,  "名": "PB÷年化ROE"},
+            "payout_ratio":     {"wt": 0.20, "低优": False, "名": "分红率%"},
         },
     },
 }

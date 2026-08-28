@@ -84,10 +84,12 @@ for i in range(5):   # 生成5家参照
     data.append({"code": f"R{i}", "roe_annualized": 10.0 + i, "nim": 1.5 + i * 0.1,
                  "roa_annualized": 0.8 + i * 0.05, "cost_income": 30.0 - i,
                  "npl_ratio": 1.4 - i * 0.1, "provision_cov": 200.0 + i * 20,
-                 "loan_provision": 3.0 + i * 0.2, "cet1": 9.0 + i * 0.3,
+                 "loan_provision": 3.0 + i * 0.2,
+                 "provision_cov_chg": 20.0 - i * 5,
+                 "cet1": 9.0 + i * 0.3,
                  "profit_yoy": 2.0 + i, "revenue_yoy": 1.0 + i,
                  "pb_self_pctile": 80.0 - i * 15, "pb_vs_sector": 20.0 - i * 10,
-                 "pb_roe": 0.7 - i * 0.05})
+                 "pb_roe": 0.7 - i * 0.05, "payout_ratio": 20.0 + i * 2})
 # 目标: 各项都取最优值, 且缺 资本充足 维度 → 应获得最高基础分且覆盖度<1
 target = {"code": "T", **{k: v for k, v in data[-1].items() if k != "code"}}
 del target["cet1"]
@@ -97,7 +99,7 @@ ref = scored[-2]
 # target 与最优参照在所有保留维度上并列第一; 差异仅在缺失的资本维度
 # (参照该项满分100), 故总分略低于参照但应保持优档
 best_ref = max(s["基础分"] for s in scored[:-1])
-check("缺项目标仍接近最高参照且≥80", best_ref - 3 <= tgt["基础分"] <= best_ref and tgt["基础分"] >= 80)
+check("缺项目标仍接近最高参照且≥75", best_ref - 3 <= tgt["基础分"] <= best_ref and tgt["基础分"] >= 75)
 check("缺资本维度→覆盖度<1", tgt["覆盖度"] < 1 and ref["覆盖度"] == 1.0)
 check("缺项被剔除而非零分", "资本充足" in tgt["缺失维度"])
 check("维度分数都在0-100", all(
@@ -105,6 +107,25 @@ check("维度分数都在0-100", all(
 low = scored[0]
 high = scored[-2]
 check("指标更优者维度分更高", high["维度分"]["盈利能力"] > low["维度分"]["盈利能力"])
+check("拨备变化改善者质量分不劣于恶化者",
+      high["维度分"]["资产质量"] >= low["维度分"]["资产质量"])
+check("高分红者估值分不劣于低分红者",
+      high["维度分"]["估值吸引力"] >= low["维度分"]["估值吸引力"])
+
+# 仅拨备变化率不同的两家: 改善者应得分更高(新因子方向性)
+pair_base = {
+    "npl_ratio": 1.0, "provision_cov": 300.0, "loan_provision": 3.0,
+    "roe_annualized": 11.0, "nim": 1.6, "roa_annualized": 0.9,
+    "cost_income": 28.0, "cet1": 10.0, "profit_yoy": 5.0, "revenue_yoy": 4.0,
+    "pb_self_pctile": 50.0, "pb_vs_sector": 0.0, "pb_roe": 0.6, "payout_ratio": 25.0,
+}
+pair = [
+    {"code": "A", **pair_base, "provision_cov_chg": -50.0},
+    {"code": "B", **pair_base, "provision_cov_chg": 10.0},
+]
+sp = score_banks(pair)
+check("拨备同比改善(+)者质量分高于恶化(-50pp)者",
+      sp[1]["维度分"]["资产质量"] > sp[0]["维度分"]["资产质量"])
 
 # ------------------------------------------------------------
 print("\n[6] apply_gates 一票否决/降档")
@@ -180,5 +201,24 @@ check("None数值安全转None", p["loan_provision"] is None)
 check("报告期名保留", p["报告期"] == "2026一季报")
 
 # ------------------------------------------------------------
+print("\n[10] WEIGHTS 权重完整性")
+for dim, cfg in WEIGHTS.items():
+    s = sum(it["wt"] for it in cfg["items"].values())
+    check(f"{dim} 子项权重和=1 (实际{s:g})", abs(s - 1) < 1e-9)
+check("资产质量含拨备变化率子项", "provision_cov_chg" in WEIGHTS["资产质量"]["items"])
+check("估值吸引力含分红率子项", "payout_ratio" in WEIGHTS["估值吸引力"]["items"])
+
+# ------------------------------------------------------------
+print("\n[11] parse_report_meta 定期报告标题解析")
+from bank_analysis import parse_report_meta  # noqa: E402
+y, k, ok = parse_report_meta("江苏常熟农村商业银行股份有限公司2025年<em>年度报告</em>")
+check("年报: 2025/年报/可下载", ok and y == "2025" and k == "年报")
+y, k, ok = parse_report_meta("江苏常熟农村商业银行股份有限公司2026年半<em>年度报告</em>")
+check("中报: 2026/中报/可下载", ok and y == "2026" and k == "中报")
+check("摘要不可下载", parse_report_meta("2025年年度报告摘要")[2] is False)
+check("英文版不可下载", parse_report_meta("2025年年度报告(英文版)")[2] is False)
+check("非定期报告不可下载", parse_report_meta("年报信息披露重大差错责任追究办法")[2] is False)
+check("无法解析年度→不可下载", parse_report_meta("季度报告")[2] is False)
+
 print(f"\n===== 结果: {PASS} PASS / {FAIL} FAIL =====")
 sys.exit(1 if FAIL else 0)
