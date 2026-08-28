@@ -252,6 +252,47 @@ def temp_level(temp):
     return nm, icon
 
 
+def index_changes(closes, dates, today=None):
+    """纯计算: 指数多周期涨跌幅% {d1,w1,m1,q1,ytd,y1}, 数据不足的周期为 None"""
+    def chg(n):
+        if len(closes) > n and closes[-1 - n]:
+            return round((closes[-1] / closes[-1 - n] - 1) * 100, 2)
+        return None
+    out = {"d1": chg(1), "w1": chg(5), "m1": chg(20), "q1": chg(60), "y1": chg(250)}
+    cur_year = (today or datetime.now()).year
+    ytd = None
+    for i, d in enumerate(dates):
+        if int(str(d)[:4]) == cur_year:
+            base = closes[i - 1] if i > 0 else closes[i]   # 上年末收盘为基期
+            if base:
+                ytd = round((closes[-1] / base - 1) * 100, 2)
+            break
+    out["ytd"] = ytd
+    return out
+
+
+def sparkline_svg(values, width=560, height=56, pad=2):
+    """纯计算: 收盘序列 → 内联SVG迷你走势图(面积+折线), 红涨蓝跌"""
+    if not values or len(values) < 2:
+        return ""
+    lo, hi = min(values), max(values)
+    rng = (hi - lo) or 1.0
+    n = len(values)
+    pts = []
+    for i, v in enumerate(values):
+        x = pad + i * (width - 2 * pad) / (n - 1)
+        y = height - pad - (v - lo) / rng * (height - 2 * pad)
+        pts.append(f"{x:.1f},{y:.1f}")
+    color = "#c2410c" if values[-1] >= values[0] else "#1d4ed8"
+    poly = " ".join(pts)
+    return (f"<svg width='{width}' height='{height}' viewBox='0 0 {width} {height}' "
+            f"style='display:block'>"
+            f"<polygon points='{pad},{height-pad} {poly} {width-pad},{height-pad}' "
+            f"fill='{color}' opacity='0.08'/>"
+            f"<polyline points='{poly}' fill='none' stroke='{color}' stroke-width='1.6'/>"
+            f"</svg>")
+
+
 # ============================================================
 # 数据获取（网络）
 # ============================================================
@@ -586,6 +627,10 @@ def run(detail_code=None, make_html=True):
           f"| 动量分{temp['子分']['动量分']})")
     print(f"   板块中位数PB {_fmt(sector_pb_now, 'pb')} → 历史分位 {_fmt(sector_pb_pctile, '百分位')}"
           f" (样本{len(sector_series)}日)")
+    idx_chg = index_changes([k["c"] for k in idx_kline], [k["date"] for k in idx_kline])
+    print("   指数近端: " + " ".join(
+        f"{lbl}{_fmt(idx_chg.get(k), '%')}" for lbl, k in
+        [("日", "d1"), ("5日", "w1"), ("20日", "m1"), ("60日", "q1"), ("YTD", "ytd"), ("1年", "y1")]))
 
     type_top = {}
     for r in ranked[:10]:
@@ -601,6 +646,9 @@ def run(detail_code=None, make_html=True):
     report = {
         "ts": ts, "index": INDEX_TCODE, "index_name": INDEX_NAME,
         "index_close": idx_close, "index_ma250_dev_pct": idx_dev250,
+        "index_changes": idx_chg,
+        "index_closes120": [round(k["c"], 2) for k in idx_kline[-120:]],
+        "index_pe_ttm": (cs_rows[-1]["pe_ttm"] if cs_rows else None),
         "sector": {"temp": temp, "level": lvl, "icon": icon,
                    "median_pb": round(sector_pb_now, 4) if sector_pb_now else None,
                    "median_pb_pctile": round(sector_pb_pctile, 1) if sector_pb_pctile is not None else None,
@@ -746,6 +794,8 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
  .kv b{display:block;font-size:19px;color:#193a63}
  .kv span{color:#8391a6;font-size:11px}
  .foot{color:#98a2b3;font-size:11px;text-align:center;margin-top:22px}
+ .chip{display:inline-block;background:#f2f5f9;border:1px solid #e6eaef;border-radius:6px;
+       padding:1px 8px;font-size:12px;color:#42536b;font-family:ui-monospace,Menlo,monospace}
 </style></head><body>
 <h1>🏦 A股银行投资分析 <span class="pill">@ICON@ @TEMP@ 分 · @LEVEL@</span></h1>
 <div class="sub">生成时间 @TS@｜基准指数 @IDXNAME@ 收盘 @IDXCLOSE@｜五维权重：盈利30 质量25 成长15 资本10 估值20</div>
@@ -758,9 +808,16 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <div class="kv"><span>动量确认 · 相对MA250偏离</span><b>@SMOM@ <small style="font-size:11px">@IDXDEV@</small></b></div>
 <div class="kv"><span>Top10 类别分布</span><b style="font-size:14px">@TYPEMIX@</b></div>
 </div>
+<div style="margin-top:12px">
+<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+<b style="color:#42536b;font-size:12px">@IDXNAME@ 近端变化</b>
+<span class='chip'>日 @CHG_D1@</span><span class='chip'>5日 @CHG_W1@</span><span class='chip'>20日 @CHG_M1@</span><span class='chip'>60日 @CHG_Q1@</span><span class='chip'>YTD @CHG_YTD@</span><span class='chip'>1年 @CHG_Y1@</span>
+</div>
+@SPARK@
+<div style="color:#98a2b3;font-size:11px;margin-top:4px">近120个交易日收盘（红涨蓝跌）｜ 官方PE-TTM @PETTM_IDX@（中证官网口径，本地累积 @ARCHIVE@ 行）</div>
+</div>
 <p style="color:#7a869a;font-size:12px;margin:8px 0 0">
-温度≥75 积极配置 ｜ 55–75 正常定投 ｜ 40–55 持有不加仓 ｜ &lt;40 减持/止盈观察。
-中证官网官方PE/股息率每日落库累积(@ARCHIVE@行)，长期将支持官方口径的历史分位。</p>
+温度≥75 积极配置 ｜ 55–75 正常定投 ｜ 40–55 持有不加仓 ｜ &lt;40 减持/止盈观察。</p>
 </div>
 
 <div class="card">
@@ -870,6 +927,12 @@ def gen_html(rep):
     icon = next((ic for lo, _nm, ic in TEMPERATURE_LEVELS if t is not None and t >= lo),
                 TEMPERATURE_LEVELS[-1][2])
 
+    ic = rep.get("index_changes") or {}
+    chg_chip = lambda k: (_fmt(ic.get(k), "%").replace("+", "<span style='color:#c2410c'>+</span>"
+                          ).replace("-", "<span style='color:#1d4ed8'>-</span>", 1)
+                          if ic.get(k) is not None else "—")
+    spark = sparkline_svg(rep.get("index_closes120") or [])
+
     html = (_HTML_TEMPLATE
             .replace("@TABLEW@", "100%")
             .replace("@ICON@", icon)
@@ -887,6 +950,14 @@ def gen_html(rep):
             .replace("@SPREADPP@", _fmt(sec["spread_pts"], "pp"))
             .replace("@SMOM@", _fmt(temp["子分"]["动量分"]))
             .replace("@IDXDEV@", _fmt(rep.get("index_ma250_dev_pct"), "%"))
+            .replace("@CHG_D1@", chg_chip("d1"))
+            .replace("@CHG_W1@", chg_chip("w1"))
+            .replace("@CHG_M1@", chg_chip("m1"))
+            .replace("@CHG_Q1@", chg_chip("q1"))
+            .replace("@CHG_YTD@", chg_chip("ytd"))
+            .replace("@CHG_Y1@", chg_chip("y1"))
+            .replace("@SPARK@", spark)
+            .replace("@PETTM_IDX@", _fmt(rep.get("index_pe_ttm")))
             .replace("@TYPEMIX@", esc(mix or "—"))
             .replace("@ARCHIVE@", str(sec["csindex_archive_rows"]))
             .replace("@BANKROWS@", "\n".join(bank_rows))

@@ -240,5 +240,18 @@ check("AH优选基准", parse_track_index("中证银行AH价格优选指数收�
 check("空文本→None", parse_track_index("") is None and parse_track_index(None) is None)
 check("无指数名→None", parse_track_index("同期活期存款利率") is None)
 
+print("\n[14] index_changes 多周期涨跌幅")
+from bank_analysis import index_changes  # noqa: E402
+from datetime import datetime as _dt
+closes = [100.0] + [100.0] * 260 + [110.0]          # 262点: 长基期+末端涨10%
+dates = ([f"20{i % 2 + 25}-0{1 + i % 9}-15" for i in range(260)]
+         + ["2026-01-05", "2026-06-30", "2026-08-28"])
+ic = index_changes(closes, dates, today=_dt(2026, 8, 28))
+check("日涨跌幅=+10%", ic["d1"] == 10.0)
+check("YTD以2026首日前收盘为基期", ic["ytd"] == 10.0)
+check("1年周期有值", ic["y1"] is not None)
+short = index_changes([100.0, 105.0], ["2026-08-27", "2026-08-28"], today=_dt(2026, 8, 28))
+check("短序列缺周期为None", short["d1"] == 5.0 and short["y1"] is None)
+
 print(f"\n===== 结果: {PASS} PASS / {FAIL} FAIL =====")
 sys.exit(1 if FAIL else 0)
