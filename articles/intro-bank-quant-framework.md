@@ -64,26 +64,26 @@
 
 这件事之后我对这套工具的定位更清楚了：分数会错，方法不能重复错。让它当着你的面认错一次，比让它多对十次更有用。
 
-## 想自己跑一套：三条命令的事
+## 想自己跑一套：装一次，两种用法
 
-这套东西做成了 Claude Code 的 Skill，本质是几个 Python 脚本加一份说明文件，只依赖免费的公开接口。上手三步。
-
-第一步，拉仓库，跑部署脚本。它会把脚本装到家目录的 ~/.bank-skill，自动建虚拟环境、装好 akshare：
+这套东西做成了 Claude Code 的 Skill，本质是几个 Python 脚本加一份说明文件，只依赖免费的公开接口。安装只要两条命令，把仓库放进 skills 目录，再跑一次部署脚本：
 
 ```bash
-git clone https://github.com/grissomsh/bank-investment-analysis.git
-cd bank-investment-analysis && bash setup.sh
+git clone https://github.com/grissomsh/bank-investment-analysis.git ~/.claude/skills/bank-investment-analysis
+cd ~/.claude/skills/bank-investment-analysis && bash setup.sh
 ```
 
-第二步，收盘后跑一次分析，一两分钟。它会输出行业温度、42 家银行的评分表，并在 ~/.bank-skill/workspace/ 下生成 HTML 报告和 JSON 数据，也就是本文说的温度卡、五维评分表和 ETF 份额追踪那一套：
+setup.sh 会把脚本装到家目录的 ~/.bank-skill，自动准备 akshare 环境（没有就就地建一个虚拟环境），结尾会打印本次可用的 python 路径，后面要用。
+
+用法一，对话式。装好后在 Claude Code 里直接说"跑一下今天的银行分析"，或者说"给招商银行做个体检""下载常熟银行的年报"，Claude 会按 SKILL.md 的指引替你执行脚本，再把结果讲成人话。
+
+用法二，命令行。收盘后跑一条（python 路径用 setup.sh 打印的那个）：
 
 ```bash
-~/.bank-skill/venv/bin/python ~/.bank-skill/scripts/bank_analysis.py
+<python> ~/.bank-skill/scripts/bank_analysis.py
 ```
 
-几个顺手的开关：--healthcheck 先查六路数据源通不通；--detail 600036 看某家银行的完整体检单；--report 601128 自动下载这家银行的年报中报 PDF 并按年份归档，方便你对照前面说的"接口看不到的另一张脸"。
-
-第三步，其实可以没有命令。因为它是个 Skill，你也可以直接在 Claude Code 里说"跑一下今天的银行分析"或者"给招商银行做个体检"，Claude 会替你执行脚本，再把结果讲成人话。命令行党和对话党，都能伺候。
+一两分钟出结果：行业温度、42 家银行的评分表，以及 ~/.bank-skill/workspace/ 下的 HTML 报告，温度卡、五维评分、ETF 份额追踪、指数走势图都在里面。几个顺手的开关：--healthcheck 先查一遍数据源通不通；--detail 600036 输出某家银行的完整体检单；--report 601128 自动下载年报中报 PDF 并按年份归档，方便你对照前面说的"接口看不到的另一张脸"。
 
 ## 它做不到的事
 

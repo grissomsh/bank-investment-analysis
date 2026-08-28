@@ -61,7 +61,7 @@ bash setup.sh
 
 | 命令 | 作用 |
 | --- | --- |
-| `bank_analysis.py --healthcheck` | 六路数据源 + SQLite 自检，失败退出码 1 |
+| `bank_analysis.py --healthcheck` | 全部数据源 + SQLite 自检，失败退出码 1 |
 | `bank_analysis.py --detail 600036` | 附带单只银行详析 |
 | `bank_analysis.py --report 601128` | 下载该行年报/中报 PDF，按报告年度归档到 `~/.bank-skill/workspace/reports/<年份>/`（巨潮官方源，自动去重） |
 | `bank_analysis.py --no-html` | 只要表格与 JSON |
