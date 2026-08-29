@@ -38,6 +38,7 @@ if _SCRIPT_DIR not in sys.path:
 
 from bank_universe import (
     BANKS, DEFAULT_ETFS, GATES, RATING_LEVELS, SECTOR_WEIGHTS, WEIGHTS,
+    CONFIDENCE,
     PB_PCTILE_MAP, PB_PCTILE_FLOOR, PB_PCTILE_CAP,
     SPREAD_MAP, MOMENTUM_DEV_SCALE, MOMENTUM_CLAMP,
     TEMPERATURE_LEVELS, INDEX_TCODE, INDEX_NAME, CSINDEX_CODE,
@@ -214,6 +215,45 @@ def apply_gates(row, gates=None, levels=None):
     return row
 
 
+def data_confidence(coverage, report_date, now=None, fallback=False):
+    """纯计算: 数据可信度分级 '高'/'中'/'低' (v1.2)。
+    依据 = 权重覆盖度 + 财报距今天数 + 是否回退到旧报告期。
+    借鉴财报深读方法的证据充分度思想: 结论强度不得超过证据强度,
+    可信度只作标注, 不改动分数与档位。"""
+    cfg = CONFIDENCE
+    now = now or datetime.now()
+    stale = None
+    if report_date:
+        try:
+            stale = (now - datetime.strptime(str(report_date)[:10], "%Y-%m-%d")).days
+        except Exception:
+            stale = None
+    cov = coverage if isinstance(coverage, (int, float)) else 0.0
+    fresh_ok = stale is not None and 0 <= stale <= cfg["fresh_days"]
+    mid_ok = stale is not None and 0 <= stale <= cfg["acceptable_days"]
+    if cov >= cfg["cov_high"] and fresh_ok:
+        return "中" if fallback else "高"     # 回退旧期者与截面并非同一报告期, 降一级
+    if cov >= cfg["cov_mid"] and mid_ok:
+        return "中"
+    return "低"
+
+
+def dominant_period(report_dates):
+    """纯计算: 全池主流报告期(众数)。并列或全缺失时返回 None(不标注任何滞后)。
+    用于中报季识别'仍停留在上一报告期'的银行——其流量指标(增速/拨备Δ/NIM)
+    与主截面窗口不可比, 见 framework §3.6。"""
+    counts = {}
+    for d in report_dates:
+        if d:
+            counts[d] = counts.get(d, 0) + 1
+    if not counts:
+        return None
+    best = max(counts.items(), key=lambda kv: kv[1])
+    if list(counts.values()).count(best[1]) > 1:
+        return None
+    return best[0]
+
+
 def sector_temperature(pb_pctile, spread_pts, mom_dev_pct,
                         w=None, pb_map=None, spread_map=None):
     """行业温度分 0-100 与三个子分。任一输入 None 时该因子剔除并重归一权重。
@@ -351,11 +391,14 @@ def parse_financial_row(r):
         return round(v, nd) if v is not None else None
 
     fdate = str(r.get("REPORT_DATE", ""))[:10]
+    newest = str(r.get("_newest_period", ""))[:10]
     fac = annualize_factor(fdate) or 1.0
     roe = _num(r.get("ROEJQ"))
     roa = _num(r.get("ZZCJLL"))
     return {
         "_report_date": fdate,
+        # 接口最新期并非本行最新可用期(EM未回填时回退) → 供可信度分级降级
+        "_period_fallback": bool(newest) and fdate != newest,
         "报告期": str(r.get("REPORT_DATE_NAME", fdate)),
         "bps": rd_(r.get("BPS")),
         "roe_annualized": round(roe * fac, 2) if roe is not None else None,
@@ -374,19 +417,27 @@ def parse_financial_row(r):
     }
 
 
-def enrich_with_prev_year_cov(df, row):
-    """用上年同期的拨备覆盖率计算同比变化(pp)。
-    df 为按报告期接口的全量DataFrame(REPORT_DATE降序), row 为 parse_financial_row 结果。"""
+def enrich_with_prev_year(df, row):
+    """用上年同期(同一报告期口径)数据计算同比边际变化因子:
+    拨备覆盖率变化(pp) / 净息差变化(pp) / 不良率变化(pp, 低优)。
+    df 为按报告期接口的全量DataFrame, row 为 parse_financial_row 结果。"""
     try:
         rd = row.get("_report_date") or ""
         prev_key = f"{int(rd[:4]) - 1}{rd[4:]}"
         m = df["REPORT_DATE"].astype(str).str.startswith(prev_key)
         if m.any():
-            prev_cov = _num(df[m].iloc[0].get("BLDKBBL"))
-            cur_cov = row.get("provision_cov")
-            if prev_cov is not None and cur_cov is not None:
-                chg = round(cur_cov - prev_cov, 1)
-                row["provision_cov_chg"] = 0.0 if chg == 0 else chg  # 避免 -0.0
+            prev = df[m].iloc[0]
+
+            def delta(cur_key, prev_key_):
+                cur, pv = _num(row.get(cur_key)), _num(prev.get(prev_key_))
+                if cur is None or pv is None:
+                    return None
+                d = round(cur - pv, 2)
+                return 0.0 if d == 0 else d          # 避免 -0.0
+
+            row["provision_cov_chg"] = delta("provision_cov", "BLDKBBL")
+            row["nim_chg"] = delta("nim", "NET_INTEREST_MARGIN")
+            row["npl_chg"] = delta("npl_ratio", "NONPERLOAN")
     except Exception:
         pass
     return row
@@ -394,7 +445,8 @@ def enrich_with_prev_year_cov(df, row):
 
 def pick_financial_row(df):
     """选行策略: 优先最新一期; 若最新期银行专项字段全空(新披露后EM尚未回填),
-    回退到最近一个字段齐全的报告期, 避免截面被NaN静默降级。"""
+    回退到最近一个字段齐全的报告期, 避免截面被NaN静默降级。
+    附带 _newest_period=接口最新期, 供 parse_financial_row 判定回退情形。"""
     def has_bank_fields(i):
         r = df.iloc[i]
         return any(_num(r.get(k)) is not None
@@ -405,12 +457,14 @@ def pick_financial_row(df):
             if has_bank_fields(i):
                 idx = i
                 break
-    return df.iloc[idx].to_dict()
+    row = df.iloc[idx].to_dict()
+    row["_newest_period"] = str(df.iloc[0].get("REPORT_DATE", ""))[:10]
+    return row
 
 
 def fetch_financial(code, retries=2):
     """东财F10主要指标(含银行专项字段): 返回最新可用一期 dict 或 None。
-    附带 拨备覆盖率同比变化(pp)。"""
+    附带同比边际因子: 拨备覆盖率/净息差/不良率变化(pp)。"""
     for attempt in range(retries):
         try:
             import akshare as ak
@@ -418,7 +472,7 @@ def fetch_financial(code, retries=2):
                 symbol=secucode(code), indicator="按报告期")
             if df is None or len(df) == 0:
                 return None
-            return enrich_with_prev_year_cov(df, parse_financial_row(pick_financial_row(df)))
+            return enrich_with_prev_year(df, parse_financial_row(pick_financial_row(df)))
         except Exception:
             if attempt == retries - 1:
                 return None
@@ -648,6 +702,12 @@ def run(detail_code=None, make_html=True):
     # ---- L2 五维评分 + 一票否决 ----
     raw_rows = score_banks(raw_rows)
     raw_rows = [apply_gates(r) for r in raw_rows]
+    pool_period = dominant_period([r.get("_report_date") for r in raw_rows])
+    for r in raw_rows:
+        r["可信度"] = data_confidence(r.get("覆盖度"), r.get("_report_date"),
+                                      fallback=bool(r.get("_period_fallback")))
+        r["期次滞后"] = bool(pool_period) and bool(r.get("_report_date")) \
+            and r["_report_date"] != pool_period
     ranked = sorted(raw_rows, key=lambda r: -(r["基础分"] if r["基础分"] == r["基础分"] else -1))
 
     # ---- L1 温度 ----
@@ -766,18 +826,22 @@ def _pad(s, width):
     return out + " " * max(0, width - disp)
 
 
-COLW = [4, 9, 7, 7, 6, 4, 6, 6, 6, 6, 6, 6, 15, 7, 7, 6, 7, 8, 6, 11]
+COLW = [4, 11, 7, 7, 6, 4, 6, 6, 6, 6, 6, 6, 15, 7, 7, 6, 7, 8, 6, 15]
 
 
 def print_table(ranked):
     print("\n===== 个股五维评分(截面分位打分, 0-100) | 现价/PE为行情参考列 =====")
+    n_lag = sum(1 for r in ranked if r.get("期次滞后"))
+    if n_lag:
+        print(f"   注: ※=报告期落后于全池主流期({n_lag}家), 其流量指标与主截面窗口不可比")
     hdr = ["排名", "名称", "代码", "类别", "总分", "档位",
            "盈利", "质量", "成长", "资本", "估值", "PB",
-           "现价(涨跌%)", "PETTM", "PE动", "不良%", "覆盖%", "拨备Δ", "分红%", "报告期"]
+           "现价(涨跌%)", "PETTM", "PE动", "不良%", "覆盖%", "拨备Δ", "分红%", "报告期·可信度"]
     print(" ".join(_pad(h, w) for h, w in zip(hdr, COLW)))
     for i, r in enumerate(ranked, 1):
         dm = r["维度分"]
-        cells = [str(i), r["name"], r["code"], r["type"],
+        name = r["name"] + ("※" if r.get("期次滞后") else "")
+        cells = [str(i), name, r["code"], r["type"],
                  f"{r['基础分']:g}", r["档位"]]
         for dim in ["盈利能力", "资产质量", "成长性", "资本充足", "估值吸引力"]:
             v = dm.get(dim)
@@ -790,7 +854,7 @@ def print_table(ranked):
                   _fmt(r.get("npl_ratio")), _fmt(r.get("provision_cov")),
                   _fmt(chg_cov, "pp") if chg_cov is not None else "—",
                   _fmt(r.get("payout_ratio")),
-                  r.get("报告期") or "—"]
+                  ((r.get("报告期") or "—") + (f"·{r['可信度']}" if r.get("可信度") else ""))]
         mark = " ⚠️" if r.get("告警") else ""
         print(" ".join(_pad(c, w) for c, w in zip(cells, COLW)) + mark)
 
@@ -816,6 +880,8 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
  .score{font-weight:700;color:#123b6d}
  tr.gate td{background:#fff7ed}
  .warn{color:#c2410c;font-size:11px}
+ .lagbadge{display:inline-block;background:#fff7ed;color:#c2410c;border:1px solid #fdba74;
+       border-radius:4px;font-size:10px;padding:0 4px;margin-left:4px;font-weight:600}
  .period{color:#98a2b3;font-size:11px}
  .mono{font-family:ui-monospace,Menlo,monospace;color:#667085}
  .big{font-size:34px;font-weight:800;color:#123b6d}
@@ -865,7 +931,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 
 <div class="card">
 <h2>📊 L2 个股五维评分（⚠️底色行为触发资产质量降档）</h2>
-<table><tr><th>#</th><th>银行</th><th>类别</th><th title="Σ维度分×维度权重, 缺失维度自动重归一">总分</th><th title="A+ ≥80 / A ≥70 / B ≥60 / C ≥50 / D <50">档位</th>
+<table><tr><th>#</th><th title="名称旁'滞后一期'徽标 = 该行报告期落后于全池主流报告期, 中报季流量指标与主截面窗口不可比">银行</th><th>类别</th><th title="Σ维度分×维度权重, 缺失维度自动重归一">总分</th><th title="A+ ≥80 / A ≥70 / B ≥60 / C ≥50 / D <50">档位</th>
 <th title="盈利/质量/成长/资本/估值五个维度的截面百分位分">维度分</th>
 <th title="行情参考列, 不参与评分">现价(涨跌%)</th>
 <th title="滚动市盈率, 行情参考列不参与评分——银行PE受拨备计提扰动大">PE-TTM</th>
@@ -877,7 +943,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <th title="个股PB÷板块中位数PB−1, 回答和同行比贵不贵; 低优">相对板块PB</th>
 <th title="当前PB在该股自身近3年分布中的百分位, 回答和自己比贵不贵; 低优">PB自身分位</th>
 <th title="近12个月实施现金分红÷年化归母净利, 含中期分红; 估值维度权重20%">分红率</th>
-<th title="一票否决/降档原因与该行最新财报期">告警 / 报告期</th></tr>
+<th title="一票否决/降档原因、该行最新财报期, 以及数据可信度(覆盖度+财报新鲜度+是否回退旧报告期, 仅标注不参与评分)">告警 / 报告期 / 可信度</th></tr>
 @BANKROWS@
 </table>
 <p style="color:#98a2b3;font-size:11px;margin:8px 0 0">
@@ -885,7 +951,10 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 银行股估值锚定 PB 与 PB÷ROE，PE 受拨备计提与减值扰动较大，仅作交叉观察。
 PE动态 = 总市值 ÷ 最新报告期年化归母净利。
 拨备Δ同比(参与资产质量评分) = 拨备覆盖率 − 上年同期，负值为消耗蓄水池；
-分红率(参与估值评分) = 近12个月实施现金分红 ÷ 年化归母净利，含中期分红。</p></div>
+分红率(参与估值评分) = 近12个月实施现金分红 ÷ 年化归母净利，含中期分红。
+数据可信度(仅标注不参与评分)：覆盖度≥95%且财报距今≤150天且未回退旧报告期 = 高；
+字段缺口较小或距今≤300天 = 中；其余(含新披露期尚未回填而沿用上期的行) = 低，
+此时该行与截面其余银行可能并非同一报告期，横比意义减弱。</p></div>
 
 <div class="card">
 <h2>💰 银行ETF池（名称含“银行”按规模Top8动态发现）</h2>
@@ -928,6 +997,15 @@ def gen_html(rep):
         if isinstance(cc, (int, float)):
             cc_cls = "#1d4ed8" if cc >= 0 else "#c2410c"
             cc_txt = f"<span style='color:{cc_cls}'>{cc:+.1f}pp</span>"
+        grade = r.get("可信度")
+        period_txt = esc(r.get("报告期") or "—")
+        g_cls = {"高": "#1d4ed8", "中": "#b45309", "低": "#c2410c"}.get(grade)
+        if grade and g_cls:
+            period_txt += f"<br><span class='period' style='color:{g_cls}'>可信度{grade}</span>"
+        name_txt = esc(r["name"])
+        if r.get("期次滞后"):
+            name_txt += (" <span class='lagbadge' title='该行报告期落后于全池主流报告期, "
+                         "中报季流量指标与主截面窗口不可比'>滞后一期</span>")
         bank_rows.append(
             "<tr%s><td>%d</td><td><b>%s</b><br><span class='mono'>%s</span></td>"
             "<td>%s</td><td class='score'>%.1f</td><td><b>%s</b></td>"
@@ -936,7 +1014,7 @@ def gen_html(rep):
             "<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
             "<td>%s<br><span class='period'>%s</span></td></tr>" % (
                 " class='gate'" if r.get("告警") else "",
-                i, esc(r["name"]), r["code"], esc(r["type"]),
+                i, name_txt, r["code"], esc(r["type"]),
                 r["基础分"], esc(r["档位"]),
                 cell("盈利能力"), cell("资产质量"), cell("成长性"),
                 cell("资本充足"), cell("估值吸引力"),
@@ -949,7 +1027,7 @@ def gen_html(rep):
                 num(r.get("pb_vs_sector"), "{:+.1f}%"),
                 num(r.get("pb_self_pctile"), "{:.0f}"),
                 num(r.get("payout_ratio"), "{:.1f}%"),
-                warn, esc(r.get("报告期") or "—")))
+                warn, period_txt))
 
     etf_rows = []
     for e in rep["etfs"]:
@@ -1142,11 +1220,13 @@ def fetch_track_index(code, name=""):
 def parse_report_meta(title, name_hint=""):
     """从公告标题提取 (报告年度, 类型年报|中报, 是否可下载)。
     兼容"2025年年度报告"与"2025年度报告"两种命名;
-    跳过摘要/英文/撤销/更正/补充类公告; 剥离 <em> 高亮标签。"""
+    跳过摘要/英文/撤销/更正/修订/审计报告及"关于…"类公告;
+    剥离 <em> 高亮标签。"""
     clean = re.sub(r"</?em>", "", title)
     if name_hint and name_hint not in clean:
         pass  # 简称仅为辅助, 不做强校验
-    if any(k in clean for k in ("摘要", "英文", "撤销", "更正", "差错", "办法", "制度", "补充")):
+    if any(k in clean for k in ("摘要", "英文", "撤销", "更正", "修订", "更新",
+                                "差错", "办法", "制度", "补充", "审计报告", "关于")):
         return None, None, False
     m = re.search(r"(\d{4})\s*年?\s*(半)?年度报告", clean)
     if not m:

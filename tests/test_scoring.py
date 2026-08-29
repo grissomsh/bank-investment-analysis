@@ -18,7 +18,7 @@ from bank_universe import WEIGHTS, GATES, RATING_LEVELS  # noqa: E402
 from bank_analysis import (annualize_factor, linear_map, hist_pctile,     # noqa: E402
                            cross_percentile_rank, score_banks, apply_gates,
                            sector_temperature, build_sector_median_pb,
-                           parse_financial_row)
+                           parse_financial_row, data_confidence)
 
 PASS = FAIL = 0
 
@@ -127,6 +127,24 @@ sp = score_banks(pair)
 check("拨备同比改善(+)者质量分高于恶化(-50pp)者",
       sp[1]["维度分"]["资产质量"] > sp[0]["维度分"]["资产质量"])
 
+# 仅净息差同比变化不同: 改善者盈利分更高(v1.2 边际因子方向性)
+pair_nim = [
+    {"code": "A", **pair_base, "nim_chg": -0.30},
+    {"code": "B", **pair_base, "nim_chg": 0.15},
+]
+sp_nim = score_banks(pair_nim)
+check("NIM同比改善(+)者盈利分高于恶化(-30bp)者",
+      sp_nim[1]["维度分"]["盈利能力"] > sp_nim[0]["维度分"]["盈利能力"])
+
+# 仅不良率同比变化不同: 下降者质量分更高(低优反转)
+pair_npl = [
+    {"code": "A", **pair_base, "npl_chg": 0.25},
+    {"code": "B", **pair_base, "npl_chg": -0.10},
+]
+sp_npl = score_banks(pair_npl)
+check("不良率同比下降者质量分高于上升者",
+      sp_npl[1]["维度分"]["资产质量"] > sp_npl[0]["维度分"]["资产质量"])
+
 # ------------------------------------------------------------
 print("\n[6] apply_gates 一票否决/降档")
 def mk(score, npl=1.0, cov=300.0, cet1=11.0, rd="2026-06-30"):
@@ -201,6 +219,9 @@ check("Q1 ROE年化 ×4", abs(p["roe_annualized"] - 3.37 * 4) < 1e-9)
 check("字段提取 nim", p["nim"] == 1.83)
 check("None数值安全转None", p["loan_provision"] is None)
 check("报告期名保留", p["报告期"] == "2026一季报")
+check("无_newest_period标记→不视为回退", p["_period_fallback"] is False)
+p_fb = parse_financial_row(dict(row, _newest_period="2026-06-30"))
+check("接口最新期更新→标记回退", p_fb["_period_fallback"] is True)
 
 # ------------------------------------------------------------
 print("\n[10] WEIGHTS 权重完整性")
@@ -209,6 +230,8 @@ for dim, cfg in WEIGHTS.items():
     check(f"{dim} 子项权重和=1 (实际{s:g})", abs(s - 1) < 1e-9)
 check("资产质量含拨备变化率子项", "provision_cov_chg" in WEIGHTS["资产质量"]["items"])
 check("估值吸引力含分红率子项", "payout_ratio" in WEIGHTS["估值吸引力"]["items"])
+check("盈利能力含NIM同比变化子项(v1.2)", "nim_chg" in WEIGHTS["盈利能力"]["items"])
+check("资产质量含不良率同比变化子项(v1.2)", "npl_chg" in WEIGHTS["资产质量"]["items"])
 
 # ------------------------------------------------------------
 print("\n[11] parse_report_meta 定期报告标题解析")
@@ -221,6 +244,10 @@ check("摘要不可下载", parse_report_meta("2025年年度报告摘要")[2] is
 check("英文版不可下载", parse_report_meta("2025年年度报告(英文版)")[2] is False)
 check("非定期报告不可下载", parse_report_meta("年报信息披露重大差错责任追究办法")[2] is False)
 check("无法解析年度→不可下载", parse_report_meta("季度报告")[2] is False)
+check("修订版不可下载", parse_report_meta("2025年年度报告（修订版）")[2] is False)
+check("更新版不可下载", parse_report_meta("2025年年度报告（更新后）")[2] is False)
+check("审计报告不可下载", parse_report_meta("2025年度报告·审计报告")[2] is False)
+check("关于类公告不可下载", parse_report_meta("关于2025年年度报告的披露公告")[2] is False)
 
 print("\n[12] share_change_stats 份额变化统计")
 from bank_analysis import share_change_stats  # noqa: E402
@@ -272,6 +299,28 @@ df_full = pd.DataFrame([
      "ROEJQ": 3.4, "NONPERLOAN": 0.75, "BLDKBBL": 438.0},
 ])
 check("字段齐全时取最新期", pick_financial_row(df_full)["REPORT_DATE_NAME"] == "2026中报")
+
+print("\n[16] data_confidence 数据可信度分级")
+from datetime import datetime as _now_dt  # noqa: E402
+_now = _now_dt(2026, 8, 29)
+check("覆盖满+财报新鲜→高", data_confidence(1.0, "2026-08-15", now=_now) == "高")
+check("覆盖满但需回退旧期→封顶中",
+      data_confidence(1.0, "2026-08-15", now=_now, fallback=True) == "中")
+check("覆盖满+150天内→高", data_confidence(0.96, "2026-04-25", now=_now) == "高")
+check("超150天在300天内→中", data_confidence(1.0, "2026-02-28", now=_now) == "中")
+check("超300天→低", data_confidence(1.0, "2025-09-01", now=_now) == "低")
+check("覆盖度0.85→中", data_confidence(0.85, "2026-08-15", now=_now) == "中")
+check("覆盖度0.70→低", data_confidence(0.70, "2026-08-15", now=_now) == "低")
+check("无财报日期→低", data_confidence(1.0, None, now=_now) == "低")
+check("覆盖度缺失→低", data_confidence(None, "2026-08-15", now=_now) == "低")
+check("未来日期→低", data_confidence(1.0, "2026-12-31", now=_now) == "低")
+
+print("\n[17] dominant_period 全池主流报告期")
+from bank_analysis import dominant_period  # noqa: E402
+check("众数即主流期", dominant_period(["2026-06-30"] * 41 + ["2026-03-31"]) == "2026-06-30")
+check("并列→None不标注任何人", dominant_period(["2026-06-30"] * 2 + ["2026-03-31"] * 2) is None)
+check("全缺失→None", dominant_period([None, ""]) is None)
+check("空列表→None", dominant_period([]) is None)
 
 print(f"\n===== 结果: {PASS} PASS / {FAIL} FAIL =====")
 sys.exit(1 if FAIL else 0)
