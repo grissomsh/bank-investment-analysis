@@ -18,7 +18,7 @@ python3 scripts/bank_analysis.py --report 601128    # download annual/interim re
 python3 scripts/bank_analysis.py --healthcheck      # probe all data sources + SQLite, exit 1 on failure
 python3 scripts/bank_analysis.py --stats            # local csindex archive status
 bash setup.sh                                       # install into ~/.claude/skills/ (reuses ~/.etf-skill/venv when present)
-python3 tests/test_scoring.py                       # offline scoring regression (76 checks, no network)
+python3 tests/test_scoring.py                       # offline scoring regression (99 checks, no network)
 ```
 
 **On this machine**: Homebrew Python is PEP 668-externally-managed. Use an existing venv with akshare — `~/.etf-skill/venv/bin/python` (from the etf-three-factor skill) or the `venv/` inside the skill dir created by setup.sh.
@@ -37,7 +37,7 @@ python3 tests/test_scoring.py                       # offline scoring regression
 
 ### Model constants
 
-All weights/thresholds/piecewise mappings live in `scripts/bank_universe.py` (`WEIGHTS`, `GATES`, `PB_PCTILE_MAP`, `SPREAD_MAP`, `SECTOR_WEIGHTS`). They are theory-driven heuristics, NOT statistically calibrated. Any change requires re-running `tests/test_scoring.py`; deeper rationale and the field-semantics pitfalls are documented in `references/bank_framework.md`.
+All weights/thresholds/piecewise mappings live in `scripts/bank_universe.py` (`WEIGHTS`, `GATES`, `CONFIDENCE`, `PB_PCTILE_MAP`, `SPREAD_MAP`, `SECTOR_WEIGHTS`). They are theory-driven heuristics, NOT statistically calibrated. Any change requires re-running `tests/test_scoring.py`; deeper rationale and the field-semantics pitfalls are documented in `references/bank_framework.md`. Since v1.2, `WEIGHTS` includes YoY marginal factors (`nim_chg`, `npl_chg`) computed in `enrich_with_prev_year` from the full report-period DataFrame; per-bank `可信度` (high/mid/low) is an annotation only — it never alters scores or levels.
 
 ### Field semantics (verified empirically — do not "fix" back)
 
