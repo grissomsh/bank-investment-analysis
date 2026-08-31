@@ -56,7 +56,7 @@ bash setup.sh
 <python> ~/.claude/skills/bank-investment-analysis/scripts/bank_analysis.py
 ```
 
-输出：控制台评分表 + `~/.claude/skills/bank-investment-analysis/workspace/银行投资分析.html`（温度卡/评分表/ETF池/指数走势图）+ 同名 JSON。
+输出：控制台评分表 + `~/.claude/skills/bank-investment-analysis/workspace/银行投资分析.html`（温度卡/评分表/ETF池/指数走势图）+ 同名 JSON。报告头部同时标注生成时间与数据日（数据日 = 指数报告交易日，周末/盘前运行时二者不同）。
 
 常用命令（`<python>` 替换为部署时打印的解释器路径）：
 
@@ -68,7 +68,7 @@ bash setup.sh
 | `bank_analysis.py --no-html` | 只要表格与 JSON |
 | `bank_analysis.py --stats` | 本地数据库状态 |
 
-开发相关：`python3 tests/test_scoring.py` 在源码仓库运行打分模型离线回归（99 用例，不触网）；改动 `scripts/bank_universe.py` 中的模型常量后必须重跑。
+开发相关：`python3 tests/test_scoring.py` 在源码仓库运行打分模型离线回归（103 用例，不触网）；改动 `scripts/bank_universe.py` 中的模型常量后必须重跑。
 
 ## 五维评分速览
 

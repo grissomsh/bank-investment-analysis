@@ -18,7 +18,7 @@ python3 scripts/bank_analysis.py --report 601128    # download annual/interim re
 python3 scripts/bank_analysis.py --healthcheck      # probe all data sources + SQLite, exit 1 on failure
 python3 scripts/bank_analysis.py --stats            # local csindex archive status
 bash setup.sh                                       # install into ~/.claude/skills/ (reuses ~/.etf-skill/venv when present)
-python3 tests/test_scoring.py                       # offline scoring regression (99 checks, no network)
+python3 tests/test_scoring.py                       # offline scoring regression (103 checks, no network)
 ```
 
 **On this machine**: Homebrew Python is PEP 668-externally-managed. Use an existing venv with akshare — `~/.etf-skill/venv/bin/python` (from the etf-three-factor skill) or the `venv/` inside the skill dir created by setup.sh.
@@ -33,7 +33,7 @@ python3 tests/test_scoring.py                       # offline scoring regression
 4. Build sector median-PB series from constituent PB histories (equal-weight median, needs ≥50% of banks valid per day) → its own-history percentile.
 5. Sector temperature = PB-percentile×50% + yield-spread×35% + momentum×15% (missing factors are dropped and weights renormalized).
 6. Five-dimension scoring by cross-sectional midrank percentiles; missing items renormalize weights within dimension; missing dimensions renormalize total weight (`覆盖度` shows coverage). Gates apply hard downgrades after scoring.
-7. Outputs: console table, JSON, HTML (template uses @TOKEN@ replacement — never %-formatting or .format, CSS braces/percent signs break both).
+7. Outputs: console table, JSON, HTML (template uses @TOKEN@ replacement — never %-formatting or .format, CSS braces/percent signs break both). Report header shows both generation time (`ts`) and data date (`data_date` = index's report trading day); JSON carries both fields top-level.
 
 ### Model constants
 
