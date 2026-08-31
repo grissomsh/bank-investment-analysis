@@ -637,7 +637,9 @@ def run(detail_code=None, make_html=True):
     idx_dev250 = ma_dev_pct(idx_kline, 250)
     idx_close = idx_kline[-1]["c"] if idx_kline else None
     idx_close_disp = round(idx_close, 2) if idx_close is not None else None
-    print(f"   指数K线 {len(idx_kline)}根 | 收盘 {_fmt(idx_close_disp)} | MA250偏离 {_fmt(idx_dev250, '%')}")
+    data_date = idx_kline[-1]["date"] if idx_kline else None   # 数据日 = 指数报告交易日
+    print(f"   指数K线 {len(idx_kline)}根 | 数据日 {data_date or '—'} | "
+          f"收盘 {_fmt(idx_close_disp)} | MA250偏离 {_fmt(idx_dev250, '%')}")
 
     cs_rows = fetch_csindex_valuation()
     if cs_rows:
@@ -735,7 +737,7 @@ def run(detail_code=None, make_html=True):
             print(f"\n⚠️ 未找到 {detail_code} 的可用数据")
 
     report = {
-        "ts": ts, "index": INDEX_TCODE, "index_name": INDEX_NAME,
+        "ts": ts, "data_date": data_date, "index": INDEX_TCODE, "index_name": INDEX_NAME,
         "index_close": idx_close, "index_ma250_dev_pct": idx_dev250,
         "index_changes": idx_chg,
         "index_closes120": [round(k["c"], 2) for k in idx_kline[-120:]],
@@ -866,13 +868,16 @@ def print_table(ranked):
 _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <title>A股银行投资分析报告</title>
 <style>
- body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;margin:24px;
-      color:#26303a;background:#fafbfd;font-size:14px;line-height:1.55}
+ body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;max-width:1560px;
+      margin:24px auto;color:#26303a;background:#fafbfd;font-size:14px;line-height:1.55}
  .card{background:#fff;border:1px solid #e6eaef;border-radius:12px;padding:18px 22px;margin-bottom:18px;
        box-shadow:0 1px 3px rgba(16,24,40,.04)}
+ .card.scroll{overflow-x:auto}   /* 仅表格卡滚动, 温度卡tooltip需溢出可见 */
  h1{font-size:21px;margin:0 0 4px} h2{font-size:16px;margin:0 0 12px;color:#1c2833}
  .sub{color:#7a869a;font-size:12px;margin-bottom:14px}
- table{border-collapse:collapse;width:@TABLEW@;font-size:13px}
+ .head h1{display:flex;align-items:center;gap:10px;margin:0 0 6px}
+ .head .sub{margin-bottom:0}
+ table{border-collapse:collapse;width:100%;font-size:13px}
  th{background:#f2f5f9;text-align:left;padding:7px 8px;border-bottom:2px solid #dde4ec;
     white-space:nowrap;color:#42536b}
  td{padding:6px 8px;border-bottom:1px solid #eef1f5;vertical-align:top}
@@ -904,9 +909,11 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
  .kv:hover::before,.kv:focus::before{content:"";position:absolute;left:22px;bottom:100%;
        border:6px solid transparent;border-top-color:#1f2937}
 </style></head><body>
+<div class="card head">
 <h1>🏦 A股银行投资分析 <span class="pill">@ICON@ @TEMP@ 分 · @LEVEL@</span></h1>
-<div class="sub">@TS@｜基准指数 @IDXNAME@ 收盘 @IDXCLOSE@｜五维权重：盈利30 质量25 成长15 资本10 估值20<br>
+<div class="sub">生成 @TS@ ｜ 数据日 @DATADATE@（@IDXNAME@报告交易日）｜基准指数 @IDXNAME@ 收盘 @IDXCLOSE@ ｜ 五维权重：盈利30 质量25 成长15 资本10 估值20<br>
 温度档位：≥75 积极配置 · 55–75 正常定投 · 40–55 持有不加仓 · &lt;40 减持/止盈观察&nbsp;&nbsp;｜&nbsp;&nbsp;个股档位：A+ ≥80 · A ≥70 · B ≥60 · C ≥50 · D &lt;50</div>
+</div>
 
 <div class="card">
 <h2>🌡️ L1 行业温度（ETF配置节奏）</h2>
@@ -929,7 +936,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <div style="color:#98a2b3;font-size:11px;margin-top:4px">近120个交易日收盘走势（悬停查看数值）｜ 官方PE-TTM @PETTM_IDX@（中证官网口径，本地累积 @ARCHIVE@ 行）</div>
 </div>
 
-<div class="card">
+<div class="card scroll">
 <h2>📊 L2 个股五维评分（⚠️底色行为触发资产质量降档）</h2>
 <table><tr><th>#</th><th title="名称旁'滞后一期'徽标 = 该行报告期落后于全池主流报告期, 中报季流量指标与主截面窗口不可比">银行</th><th>类别</th><th title="Σ维度分×维度权重, 缺失维度自动重归一">总分</th><th title="A+ ≥80 / A ≥70 / B ≥60 / C ≥50 / D <50">档位</th>
 <th title="盈利/质量/成长/资本/估值五个维度的截面百分位分">维度分</th>
@@ -943,7 +950,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <th title="个股PB÷板块中位数PB−1, 回答和同行比贵不贵; 低优">相对板块PB</th>
 <th title="当前PB在该股自身近3年分布中的百分位, 回答和自己比贵不贵; 低优">PB自身分位</th>
 <th title="近12个月实施现金分红÷年化归母净利, 含中期分红; 估值维度权重20%">分红率</th>
-<th title="一票否决/降档原因、该行最新财报期, 以及数据可信度(覆盖度+财报新鲜度+是否回退旧报告期, 仅标注不参与评分)">告警 / 报告期 / 可信度</th></tr>
+<th title="一票否决/降档原因、该行最新财报期, 以及数据可信度(覆盖度+财报新鲜度+是否回退旧报告期, 仅标注不参与评分)">告警 / 报告期<br>可信度</th></tr>
 @BANKROWS@
 </table>
 <p style="color:#98a2b3;font-size:11px;margin:8px 0 0">
@@ -956,7 +963,7 @@ PE动态 = 总市值 ÷ 最新报告期年化归母净利。
 字段缺口较小或距今≤300天 = 中；其余(含新披露期尚未回填而沿用上期的行) = 低，
 此时该行与截面其余银行可能并非同一报告期，横比意义减弱。</p></div>
 
-<div class="card">
+<div class="card scroll">
 <h2>💰 银行ETF池（名称含“银行”按规模Top8动态发现）</h2>
 <table><tr><th>代码</th><th>名称</th><th>追踪指数</th><th>现价</th><th>IOPV溢价</th><th>MA250偏离</th>
 <th>份额(亿份)</th><th>份额日Δ</th><th>份额5日Δ</th>
@@ -1001,7 +1008,7 @@ def gen_html(rep):
         period_txt = esc(r.get("报告期") or "—")
         g_cls = {"高": "#1d4ed8", "中": "#b45309", "低": "#c2410c"}.get(grade)
         if grade and g_cls:
-            period_txt += f"<br><span class='period' style='color:{g_cls}'>可信度{grade}</span>"
+            period_txt += f" <span class='period' style='color:{g_cls}'>可信度{grade}</span>"
         name_txt = esc(r["name"])
         if r.get("期次滞后"):
             name_txt += (" <span class='lagbadge' title='该行报告期落后于全池主流报告期, "
@@ -1009,7 +1016,7 @@ def gen_html(rep):
         bank_rows.append(
             "<tr%s><td>%d</td><td><b>%s</b><br><span class='mono'>%s</span></td>"
             "<td>%s</td><td class='score'>%.1f</td><td><b>%s</b></td>"
-            "<td style='white-space:nowrap'>盈%s 质%s 成%s 资%s 估%s</td>"
+            "<td style='white-space:nowrap'>盈%s 质%s 成%s<br>资%s 估%s</td>"
             "<td class='mono' style='white-space:nowrap'>%s</td><td>%s</td><td>%s</td>"
             "<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
             "<td>%s<br><span class='period'>%s</span></td></tr>" % (
@@ -1065,11 +1072,11 @@ def gen_html(rep):
                         rep.get("index_closes120") or [])
 
     html = (_HTML_TEMPLATE
-            .replace("@TABLEW@", "100%")
             .replace("@ICON@", icon)
             .replace("@TEMP@", _fmt(t))
             .replace("@LEVEL@", esc(sec["level"]))
             .replace("@TS@", esc(rep["ts"]))
+            .replace("@DATADATE@", esc(rep.get("data_date") or "—"))
             .replace("@IDXNAME@", esc(rep["index_name"]))
             .replace("@IDXCLOSE@", _fmt(rep.get("index_close")))
             .replace("@SPB@", _fmt(temp["子分"]["PB分位分"]))
