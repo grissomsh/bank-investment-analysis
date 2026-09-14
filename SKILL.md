@@ -8,6 +8,7 @@ description: A股银行股/银行ETF 定量投资分析系统 — 四层框架�
 ## 核心文件
 
 - **`scripts/bank_analysis.py`** — 主分析脚本：拉数 → 行业温度 → 个股五维评分 → 表格/HTML/JSON
+- **`scripts/bank_daily_brief.py`** — 每日背景材料收料器：政策金融数据(LPR/社融/M2) + 池内公告 + 板块新闻 + 大宗/研报 → `workspace/brief/`（定性素材层，只收料不做判断）
 - **`scripts/bank_universe.py`** — 单点配置：42家银行池 + 模型常量（权重/GATES/映射表）
 - **`scripts/bank_data_store.py`** — SQLite 存档（中证官方估值每日累积）
 - **`tests/test_scoring.py`** — 打分模型离线回归测试（不触网）
@@ -40,6 +41,7 @@ cd bank-investment-analysis && bash setup.sh
 | 附带单只个股详析 | `python3 scripts/bank_analysis.py --detail 600036` |
 | 不生成 HTML（只要表格+JSON） | `python3 scripts/bank_analysis.py --no-html` |
 | 下载定期报告PDF（年报/中报, 按年归档） | `python3 scripts/bank_analysis.py --report 601128 [--limit 4]` |
+| 收当日背景材料（政策/公告/新闻/资金面） | `python3 scripts/bank_daily_brief.py [--days 3]` |
 | 查看本地数据库状态 | `python3 scripts/bank_analysis.py --stats` |
 | 打分模型离线回归 | `python3 tests/test_scoring.py` |
 
@@ -53,6 +55,7 @@ cd bank-investment-analysis && bash setup.sh
 | --- | --- | --- |
 | HTML报告 | `workspace/银行投资分析.html` | 温度卡 + 全量评分表 + ETF池 |
 | JSON数据 | `workspace/银行投资分析.json` | 全部结构化结果 |
+| 每日背景材料 | `workspace/brief/YYYY-MM-DD.md` | 政策金融数据/池内公告/板块新闻/大宗研报（定性素材，配 raw/ 原始数据与 brief.db 宏观时序） |
 | SQLite | `workspace/bank_history.db` | 中证官方PE/股息率逐日累积 |
 
 工作区可用环境变量 `BANK_WORKSPACE` 覆盖。
@@ -116,3 +119,4 @@ python3 scripts/bank_analysis.py --healthcheck   # 全部数据源+DB逐一自�
 更多细节:
 
 - 方法论/公式推导/口径验证 → `references/bank_framework.md`
+- 宏观素材(社融/M2/LPR)如何读成判断 → `references/bank_framework.md` §7（分析 brief 时按 §7.5 四段框架输出）

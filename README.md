@@ -25,6 +25,7 @@ A 股银行股 / 银行 ETF 定量投资分析 Skill。回答两个问题：
 - `SKILL.md`：skill 入口说明
 - `setup.sh`：安装脚本（把 Skill 装进 ~/.claude/skills/，就地建 venv 按需）
 - `scripts/bank_analysis.py`：主流水线
+- `scripts/bank_daily_brief.py`：每日背景材料收料器（政策金融数据/池内公告/板块新闻/大宗研报，定性素材层）
 - `scripts/bank_universe.py`：监控池与模型常量（单点定义）
 - `scripts/bank_data_store.py`：SQLite 存档模块
 - `references/bank_framework.md`：框架方法论详解（DDM 推导 / 权重依据 / 字段口径坑）
@@ -66,6 +67,7 @@ bash setup.sh
 | `bank_analysis.py --detail 600036` | 附带单只银行详析 |
 | `bank_analysis.py --report 601128` | 下载该行年报/中报 PDF，按报告年度归档到安装目录 `workspace/reports/<年份>/`（巨潮官方源，自动去重） |
 | `bank_analysis.py --no-html` | 只要表格与 JSON |
+| `bank_daily_brief.py [--days 3]` | 收当日背景材料（LPR/社融/M2、池内公告、板块新闻、大宗/研报）→ `workspace/brief/` |
 | `bank_analysis.py --stats` | 本地数据库状态 |
 
 开发相关：`python3 tests/test_scoring.py` 在源码仓库运行打分模型离线回归（103 用例，不触网）；改动 `scripts/bank_universe.py` 中的模型常量后必须重跑。

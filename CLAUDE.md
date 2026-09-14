@@ -16,6 +16,7 @@ python3 scripts/bank_analysis.py --detail 600036    # additionally print one ban
 python3 scripts/bank_analysis.py --no-html          # skip HTML report
 python3 scripts/bank_analysis.py --report 601128    # download annual/interim report PDFs (cninfo) into reports/<fiscal-year>/
 python3 scripts/bank_analysis.py --healthcheck      # probe all data sources + SQLite, exit 1 on failure
+python3 scripts/bank_daily_brief.py                 # daily brief: macro + pool announcements + news + dzjy/research → workspace/brief/
 python3 scripts/bank_analysis.py --stats            # local csindex archive status
 bash setup.sh                                       # install into ~/.claude/skills/ (reuses ~/.etf-skill/venv when present)
 python3 tests/test_scoring.py                       # offline scoring regression (103 checks, no network)
@@ -34,6 +35,8 @@ python3 tests/test_scoring.py                       # offline scoring regression
 5. Sector temperature = PB-percentile×50% + yield-spread×35% + momentum×15% (missing factors are dropped and weights renormalized).
 6. Five-dimension scoring by cross-sectional midrank percentiles; missing items renormalize weights within dimension; missing dimensions renormalize total weight (`覆盖度` shows coverage). Gates apply hard downgrades after scoring.
 7. Outputs: console table, JSON, HTML (template uses @TOKEN@ replacement — never %-formatting or .format, CSS braces/percent signs break both). Report header shows both generation time (`ts`) and data date (`data_date` = index's report trading day); JSON carries both fields top-level.
+
+The daily brief (`bank_daily_brief.py`, cron 21:30, output `workspace/brief/`) is a qualitative material layer — it never feeds the scoring model. Interpretation methodology (社融→盈利传导、三层回答法、月度验证清单) lives in `references/bank_framework.md` §7; when analyzing a brief in-session, follow its §7.5 four-part structure (节奏/结构/主题/风险) and declare any stale sources up front.
 
 ### Model constants
 
